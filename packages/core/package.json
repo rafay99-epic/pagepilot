@@ -6,9 +6,10 @@
   "exports": {
     "./r2": "./src/r2.ts",
     "./trpc": "./src/trpc.ts",
-    "./routers/*": "./src/routers/*.ts"
+    "./routers/_app": "./src/routers/_app.ts"
   },
   "scripts": {
+    "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .turbo"
   },
