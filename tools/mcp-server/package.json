@@ -1,0 +1,19 @@
+{
+  "name": "@pagepilot/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@pagepilot/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.1.0",
+    "@trpc/client": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

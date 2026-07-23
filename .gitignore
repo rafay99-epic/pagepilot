@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+.turbo/
+.next/
+dist/
+.next.d/
+
+# Environment files
+.env
+.env.local
+*.local
+
+# OS
+.DS_Store
+
+# Debug
+npm-debug.log*
