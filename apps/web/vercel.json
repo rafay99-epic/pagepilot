@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/**/*.ts": {
-      "memory": 256
-    }
-  }
-}
