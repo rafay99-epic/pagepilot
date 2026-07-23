@@ -8,7 +8,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@pagepilot/core": "workspace:*",
+    "@pagepilot/core": "file:../../packages/core",
     "@modelcontextprotocol/sdk": "^1.1.0",
     "@trpc/client": "^11.0.0"
   },
