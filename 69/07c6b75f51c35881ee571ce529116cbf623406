@@ -1,0 +1,70 @@
+packages/core/src/routers/slop.ts
+  s_54672078f002c7::t_d8037505b83ac2 3,11,15,29-32
+  s_54672078f002c7::t_c03b2b1504ce25 33-34
+apps/web/src/app/dashboard/list.tsx
+  s_54672078f002c7::t_ddbd74817f1863 152
+  s_54672078f002c7::t_2efa4827ec7531 4
+  s_54672078f002c7::t_20bad956c4018d 117-118,121,124-131,137
+packages/core/src/auth.ts
+  s_54672078f002c7::t_a926afb902312e 1-40
+packages/core/src/r2.test.ts
+  s_54672078f002c7::t_659395ac59bb55 76
+  s_54672078f002c7::t_3b03cbf1f05735 2,6-14,36-75,77,82-89,98,101
+tools/mcp-server/src/index.ts
+  s_54672078f002c7::t_94cc760b909905 4-6,10-27,30-32,39,52-54,58-61,64-69,77-78,85,89-91,98-125,129
+apps/web/src/app/docs/page.tsx
+  s_54672078f002c7::t_fbf2d62b27b9bb 126-129
+  s_54672078f002c7::t_bb74e4ee3ab397 13-14,24-25,38-41,47-49,105-107,292-293
+  s_54672078f002c7::t_9ee5fd7ad859cb 140,160,171,184
+  s_54672078f002c7::t_5c95075f6d59f4 212-217
+  s_54672078f002c7::t_a1f2b12679611b 254-257
+  s_54672078f002c7::t_db34bf5e673eb3 265-270
+  s_54672078f002c7::t_c28999ae15f64a 15-23,26-37,42-46
+  s_54672078f002c7::t_b384b907eba9f2 72-76,82-83,91-104,108
+  s_54672078f002c7::t_0f49da10d66d1e 294-295
+apps/web/src/app/view/[id]/route.ts
+  s_54672078f002c7::t_5bef2db5a2cd5f 2-5,8,13-18,21-27
+packages/core/package.json
+  s_54672078f002c7::t_4bb2961a151fc0 8
+apps/web/src/app/page.tsx
+  s_54672078f002c7::t_9ce5c2909972bd 75-76
+  s_54672078f002c7::t_8535983f1ebed9 56
+  s_54672078f002c7::t_f32405c3ab0292 66
+  s_54672078f002c7::t_3a05420972c7a9 40
+README.md
+  s_54672078f002c7::t_4ce46c9985e51a 45-56,63,69-71,74-78,85-86,93-108,112-122
+apps/web/src/app/dashboard/slop-row.tsx
+  s_54672078f002c7::t_0d834234352313 6,11-20,23-24,35-43,53-62,64-66,69
+packages/core/src/trpc.ts
+  s_54672078f002c7::t_f26bd3aa377cd8 3,6,12
+apps/web/src/app/robots.ts
+  s_54672078f002c7::t_f9d7931ddc22fe 1-7
+apps/web/src/app/api/unlock/route.ts
+  s_54672078f002c7::t_ba0de990a1918d 1-27
+apps/web/src/trpc/provider.tsx
+  s_54672078f002c7::t_fee579308e781b 12-14
+packages/core/src/r2.ts
+  s_54672078f002c7::t_90aab588f3c702 182
+  s_54672078f002c7::t_4ea1ee070bf14e 14
+  s_54672078f002c7::t_3b28bfd9ce7804 42-50,52,54,56-66,71,154
+  s_54672078f002c7::t_8ba18fc26ccd02 99,102,117,122-152
+  s_54672078f002c7::t_02fec11b4e401c 7
+  s_54672078f002c7::t_719607f30262fd 153
+  s_54672078f002c7::t_9e35d3697c2e3a 155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "6907c6b75f51c35881ee571ce529116cbf623406",
+  "prompts": {},
+  "sessions": {
+    "s_54672078f002c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "609b1f89-caba-4862-8070-24ad80aa2752",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
