@@ -10,12 +10,18 @@ export default function Docs() {
 
       <Section title="Quick Start">
         <p className="text-surface-400 mb-4">
-          PagePilot exposes three MCP tools that any compatible agent can call. You'll need
-          two environment variables to configure the MCP server:
+          PagePilot exposes three MCP tools that any compatible agent can call. You'll
+          need two environment variables to configure the MCP server:
         </p>
         <div className="space-y-4">
-          <EnvVar name="PAGEPILOT_URL" description="Your deployed web app URL (e.g. https://pagepilot.vercel.app)" />
-          <EnvVar name="PAGEPILOT_API_KEY" description="A secret key that protects the deploy endpoint. Generate a random one." />
+          <EnvVar
+            name="PAGEPILOT_URL"
+            description="Your deployed web app URL (e.g. https://pagepilot.vercel.app)"
+          />
+          <EnvVar
+            name="PAGEPILOT_API_KEY"
+            description="A secret key that protects the deploy endpoint. Generate a random one."
+          />
         </div>
       </Section>
 
@@ -60,7 +66,7 @@ export default function Docs() {
               {
                 name: "id",
                 type: "string",
-                desc: "The page ID to delete (e.g. 'a1b2c3d4')",
+                desc: "The full page ID returned by list_pages or deploy_page",
               },
             ]}
             returns='{ "ok": true }'
@@ -159,23 +165,47 @@ export default function Docs() {
           bucket — everything stays under your control.
         </p>
 
-        <h3 className="text-surface-200 mt-6 mb-3 font-semibold">Step 1: Create an R2 bucket</h3>
+        <h3 className="text-surface-200 mb-3 mt-6 font-semibold">
+          Step 1: Create an R2 bucket
+        </h3>
         <ol className="text-surface-400 list-inside list-decimal space-y-1 text-sm">
-          <li>Go to the{" "}
-            <a href="https://dash.cloudflare.com" className="text-pagepilot-400 underline">Cloudflare Dashboard</a>
-            {" "}→ R2 → Create Bucket
+          <li>
+            Go to the{" "}
+            <a
+              href="https://dash.cloudflare.com"
+              className="text-pagepilot-400 underline"
+            >
+              Cloudflare Dashboard
+            </a>{" "}
+            → R2 → Create Bucket
           </li>
           <li>Name it whatever you like</li>
-          <li>Create an API token with <strong>Object Read &amp; Write</strong> permissions</li>
-          <li>Copy the <strong>Access Key ID</strong>, <strong>Secret Access Key</strong>, and <strong>Account ID</strong></li>
+          <li>
+            Create an API token with <strong>Object Read &amp; Write</strong> permissions
+          </li>
+          <li>
+            Copy the <strong>Access Key ID</strong>, <strong>Secret Access Key</strong>,
+            and <strong>Account ID</strong>
+          </li>
         </ol>
 
-        <h3 className="text-surface-200 mt-6 mb-3 font-semibold">Step 2: Deploy to Vercel</h3>
+        <h3 className="text-surface-200 mb-3 mt-6 font-semibold">
+          Step 2: Deploy to Vercel
+        </h3>
         <ol className="text-surface-400 list-inside list-decimal space-y-1 text-sm">
-          <li>Fork or clone the{" "}
-            <a href="https://github.com" className="text-pagepilot-400 underline">PagePilot repo</a>
+          <li>
+            Fork or clone the{" "}
+            <a
+              href="https://github.com/rafay99-epic/pagepilot"
+              className="text-pagepilot-400 underline"
+            >
+              PagePilot repo
+            </a>
           </li>
-          <li>Import the project in Vercel (point it at <code className="text-surface-300">apps/web</code>)</li>
+          <li>
+            Import the project in Vercel (point it at{" "}
+            <code className="text-surface-300">apps/web</code>)
+          </li>
           <li>Add these environment variables:</li>
         </ol>
 
@@ -191,7 +221,9 @@ PUBLIC_URL=https://your-app.vercel.app`}
           />
         </div>
 
-        <h3 className="text-surface-200 mt-6 mb-3 font-semibold">Step 3: Configure your agent</h3>
+        <h3 className="text-surface-200 mb-3 mt-6 font-semibold">
+          Step 3: Configure your agent
+        </h3>
         <p className="text-surface-400 text-sm">
           Point <code className="text-surface-300">PAGEPILOT_URL</code> to your Vercel app
           and use the same <code className="text-surface-300">PAGEPILOT_API_KEY</code>.
@@ -215,6 +247,13 @@ PUBLIC_URL=http://localhost:3000`}
           The dashboard is at <code className="text-surface-300">/dashboard</code> and the
           tRPC endpoint at <code className="text-surface-300">/api/trpc</code>.
         </p>
+        <p className="text-surface-400 mt-3 text-sm">
+          The dashboard asks for your{" "}
+          <code className="text-surface-300">PAGEPILOT_API_KEY</code> on first visit and
+          keeps it in that browser&apos;s local storage. Only{" "}
+          <code className="text-surface-300">/view/&lt;id&gt;</code> share links are
+          public.
+        </p>
       </Section>
     </div>
   );
@@ -232,7 +271,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function EnvVar({ name, description }: { name: string; description: string }) {
   return (
     <div className="border-surface-800 bg-surface-900/50 flex items-center gap-4 rounded-xl border p-4">
-      <code className="text-pagepilot-400 shrink-0 font-mono text-sm font-semibold">{name}</code>
+      <code className="text-pagepilot-400 shrink-0 font-mono text-sm font-semibold">
+        {name}
+      </code>
       <p className="text-surface-400 text-sm">{description}</p>
     </div>
   );

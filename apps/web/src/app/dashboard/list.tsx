@@ -1,6 +1,7 @@
 "use client";
 
 import { trpc } from "@/trpc/client";
+import { setApiKey } from "@/trpc/provider";
 import { useMemo, useCallback } from "react";
 import { SlopRow } from "./slop-row";
 
@@ -55,13 +56,22 @@ export default function DashboardList() {
     );
   }
 
+  if (error?.data?.code === "UNAUTHORIZED") {
+    return (
+      <div className="py-12">
+        <Header />
+        <KeyForm />
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="py-12">
         <Header />
-        <div className="border-red-900/50 bg-red-950/20 rounded-xl border p-8 text-center">
+        <div className="rounded-xl border border-red-900/50 bg-red-950/20 p-8 text-center">
           <p className="text-red-400">Failed to load pages</p>
-          <p className="text-red-600 mt-1 text-sm">{error.message}</p>
+          <p className="mt-1 text-sm text-red-600">{error.message}</p>
         </div>
       </div>
     );
@@ -101,6 +111,41 @@ export default function DashboardList() {
         </div>
       )}
     </div>
+  );
+}
+
+function KeyForm() {
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const key = new FormData(e.currentTarget).get("key");
+        if (typeof key === "string" && key) {
+          setApiKey(key);
+          window.location.reload();
+        }
+      }}
+      className="border-surface-800 bg-surface-900/50 mx-auto max-w-sm rounded-xl border p-8 text-center"
+    >
+      <p className="text-surface-300">This vault is locked.</p>
+      <p className="text-surface-600 mt-1 text-sm">
+        Enter your <code>PAGEPILOT_API_KEY</code> to view your pages. It is kept in this
+        browser only.
+      </p>
+      <input
+        name="key"
+        type="password"
+        autoComplete="current-password"
+        placeholder="API key"
+        className="border-surface-700 focus:border-pagepilot-500 mt-6 w-full rounded-lg border bg-transparent px-3 py-2 text-sm outline-none"
+      />
+      <button
+        type="submit"
+        className="bg-pagepilot-600 hover:bg-pagepilot-500 mt-3 w-full rounded-lg px-4 py-2 text-sm font-medium text-white transition"
+      >
+        Unlock
+      </button>
+    </form>
   );
 }
 

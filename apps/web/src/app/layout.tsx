@@ -34,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <footer className="border-surface-800 text-surface-600 border-t py-8 text-center text-sm">
             PagePilot &mdash; private HTML vault for AI agents &mdash;{" "}
             <a
-              href="https://github.com"
+              href="https://github.com/rafay99-epic/pagepilot"
               className="text-surface-400 transition hover:text-white"
             >
               GitHub

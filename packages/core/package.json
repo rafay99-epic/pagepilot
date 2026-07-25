@@ -9,7 +9,6 @@
     "./routers/_app": "./src/routers/_app.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist .turbo"
   },
@@ -19,6 +18,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.14",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
   }

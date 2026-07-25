@@ -40,8 +40,8 @@ export default function Home() {
           description="Every HTML page is stored in your own Cloudflare R2 bucket. You control access. No third party sees your content."
         />
         <FeatureCard
-          title="Zero auth friction"
-          description="List and delete from the dashboard without any login wall. The deploy endpoint is protected so your bucket stays yours."
+          title="One key, whole vault"
+          description="Deploy, list and delete all sit behind a single API key. Only the share links you hand out are public."
         />
         <FeatureCard
           title="Type-safe API"

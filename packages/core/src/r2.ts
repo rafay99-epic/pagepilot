@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 
 export type SlopRecord = {
@@ -11,9 +12,7 @@ export type SlopRecord = {
   createdAt: string;
 };
 
-type IndexFile = {
-  slops: SlopRecord[];
-};
+const PREFIX = "slops/";
 
 export function getClient() {
   const accountId = process.env.R2_ACCOUNT_ID;
@@ -37,40 +36,41 @@ export function getClient() {
   };
 }
 
-async function readIndex(client: S3Client, bucket: string): Promise<IndexFile> {
-  try {
-    const cmd = new GetObjectCommand({
-      Bucket: bucket,
-      Key: "_index.json",
-    });
-    const res = await client.send(cmd);
-    const body = await res.Body?.transformToString();
-    return body ? JSON.parse(body) : { slops: [] };
-  } catch (e: unknown) {
-    if ((e as { name?: string }).name === "NoSuchKey") {
-      return { slops: [] };
-    }
-    throw e;
-  }
+/**
+ * An id is opaque: `<random>~<base64url title>`. Keeping the title in the key
+ * means listing is one ListObjectsV2 with no index file for concurrent deploys
+ * to clobber. base64url rather than encodeURIComponent because an id goes into a
+ * URL *path segment*, and a percent-encoded `/` gets split back out by routers.
+ * Don't parse an id outside this module — use `titleOf`.
+ */
+function makeId(title: string | undefined): string {
+  const random = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+  const label = (title || "").trim().slice(0, 120);
+  if (!label) return random;
+  return `${random}~${Buffer.from(label, "utf8").toString("base64url")}`;
 }
 
-async function writeIndex(
-  client: S3Client,
-  bucket: string,
-  index: IndexFile,
-): Promise<void> {
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: "_index.json",
-      Body: JSON.stringify(index),
-      ContentType: "application/json",
-    }),
-  );
+function titleOf(id: string): string {
+  const sep = id.indexOf("~");
+  if (sep === -1) return id;
+  const encoded = id.slice(sep + 1);
+  const decoded = Buffer.from(encoded, "base64url").toString("utf8");
+  // base64url decoding never throws, it just drops junk — fall back if lossy.
+  return Buffer.from(decoded, "utf8").toString("base64url") === encoded
+    ? decoded
+    : encoded;
+}
+
+function keyOf(id: string): string {
+  return `${PREFIX}${id}.html`;
 }
 
 function getPublicUrl(id: string): string {
-  const base = (process.env.PUBLIC_URL || "").replace(/\/+$/, "");
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  const base = (process.env.PUBLIC_URL || (vercel ? `https://${vercel}` : "")).replace(
+    /\/+$/,
+    "",
+  );
   return base ? `${base}/view/${id}` : `/view/${id}`;
 }
 
@@ -79,73 +79,78 @@ export async function deploySlop(
   title?: string,
 ): Promise<SlopRecord & { url: string }> {
   const { client, bucket } = getClient();
-  const id = crypto.randomUUID().slice(0, 8);
-  const label = title || `page-${id}`;
-  const key = `slops/${id}.html`;
+  const id = makeId(title);
 
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,
-      Key: key,
+      Key: keyOf(id),
       Body: html,
-      ContentType: "text/html",
+      ContentType: "text/html; charset=utf-8",
     }),
   );
 
-  const index = await readIndex(client, bucket);
-  const record: SlopRecord = {
+  return {
     id,
-    title: label,
+    title: titleOf(id),
     createdAt: new Date().toISOString(),
+    url: getPublicUrl(id),
   };
-  index.slops.unshift(record);
-  await writeIndex(client, bucket, index);
-
-  return { ...record, url: getPublicUrl(id) };
 }
 
 export async function listSlops(
   limit = 50,
   cursor?: string,
-): Promise<{ items: SlopRecord[]; nextCursor?: string }> {
+): Promise<{ items: (SlopRecord & { url: string })[]; nextCursor?: string }> {
   const { client, bucket } = getClient();
-  const index = await readIndex(client, bucket);
-  const sorted = index.slops.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
 
-  const startIndex = cursor ? sorted.findIndex((s) => s.id === cursor) + 1 : 0;
-  const page = sorted.slice(startIndex, startIndex + limit);
+  // R2 lists lexicographically, so newest-first needs every key in hand before
+  // slicing. ponytail: full scan per request; move to a date-ordered key prefix
+  // if this bucket ever holds enough pages for the scan to hurt.
+  const all: SlopRecord[] = [];
+  let token: string | undefined;
+  do {
+    const res = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: PREFIX,
+        ContinuationToken: token,
+      }),
+    );
+    for (const obj of res.Contents ?? []) {
+      if (!obj.Key?.endsWith(".html")) continue;
+      const id = obj.Key.slice(PREFIX.length, -".html".length);
+      all.push({
+        id,
+        title: titleOf(id),
+        createdAt: (obj.LastModified ?? new Date(0)).toISOString(),
+      });
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+
+  all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  const start = cursor ? all.findIndex((s) => s.id === cursor) + 1 : 0;
+  const page = all.slice(start, start + limit);
 
   return {
-    items: page,
-    nextCursor: page.length === limit ? page[page.length - 1].id : undefined,
+    items: page.map((s) => ({ ...s, url: getPublicUrl(s.id) })),
+    nextCursor: start + limit < all.length ? page[page.length - 1]?.id : undefined,
   };
 }
 
 export async function deleteSlop(id: string): Promise<void> {
   const { client, bucket } = getClient();
-
-  await client.send(
-    new DeleteObjectCommand({
-      Bucket: bucket,
-      Key: `slops/${id}.html`,
-    }),
-  );
-
-  const index = await readIndex(client, bucket);
-  index.slops = index.slops.filter((s) => s.id !== id);
-  await writeIndex(client, bucket, index);
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: keyOf(id) }));
 }
 
 export async function getSlopHtml(id: string): Promise<string | null> {
   const { client, bucket } = getClient();
   try {
-    const cmd = new GetObjectCommand({
-      Bucket: bucket,
-      Key: `slops/${id}.html`,
-    });
-    const res = await client.send(cmd);
+    const res = await client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: keyOf(id) }),
+    );
     return (await res.Body?.transformToString()) ?? null;
   } catch (e: unknown) {
     if ((e as { name?: string }).name === "NoSuchKey") return null;

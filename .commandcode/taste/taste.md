@@ -11,4 +11,5 @@
 - Use a single root `.gitignore` symlinked to workspace locations for consistent ignore rules. Confidence: 0.70
 
 # architecture
+
 - Route all API/mutation operations through tRPC, not directly to storage (for security). Confidence: 0.65

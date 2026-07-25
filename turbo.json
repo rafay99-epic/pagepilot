@@ -3,15 +3,19 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "dist/**"],
+      "outputs": [".next/**"],
       "env": [
         "R2_BUCKET",
         "R2_ACCOUNT_ID",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
         "PAGEPILOT_API_KEY",
-        "PUBLIC_URL"
+        "PUBLIC_URL",
+        "VERCEL_PROJECT_PRODUCTION_URL"
       ]
+    },
+    "@pagepilot/core#build": {
+      "outputs": []
     },
     "dev": {
       "cache": false,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, publicProcedure, protectedProcedure } from "../trpc";
+import { router, protectedProcedure } from "../trpc";
 import { deploySlop, listSlops, deleteSlop } from "../r2";
 
 export const slopRouter = router({
@@ -14,7 +14,7 @@ export const slopRouter = router({
       return deploySlop(input.html, input.title);
     }),
 
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z.object({
         limit: z.number().min(1).max(100).default(50),
@@ -25,7 +25,7 @@ export const slopRouter = router({
       return listSlops(input.limit, input.cursor);
     }),
 
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ input }) => {
       await deleteSlop(input.id);
