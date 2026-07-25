@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSlopHtml, isSharedId } from "@pagepilot/core/r2";
+import { getPageHtml, isSharedId } from "@pagepilot/core/r2";
 import { isAuthed } from "@pagepilot/core/auth";
 
 const notFound = () => new NextResponse("Not found", { status: 404 });
@@ -14,7 +14,7 @@ export async function GET(
   // id exists. Checked before touching R2, so an unauthorised probe costs nothing.
   if (!isSharedId(id) && !isAuthed(request)) return notFound();
 
-  const html = await getSlopHtml(id);
+  const html = await getPageHtml(id);
   if (!html) return notFound();
 
   return new NextResponse(html, {

@@ -3,13 +3,11 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "tools/*"
+    "packages/*"
   ],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "mcp": "bun run --cwd tools/mcp-server src/index.ts",
     "typecheck": "turbo typecheck",
     "test": "bun --env-file=.env.local test",
     "lint": "turbo lint",

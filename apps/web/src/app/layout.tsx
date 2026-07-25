@@ -23,10 +23,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 Docs
               </a>
               <a
-                href="/dashboard"
+                href="https://github.com/rafay99-epic/pagepilot"
                 className="bg-pagepilot-600 hover:bg-pagepilot-500 rounded-lg px-4 py-2 text-sm font-medium text-white transition"
               >
-                Dashboard
+                GitHub
               </a>
             </nav>
           </header>

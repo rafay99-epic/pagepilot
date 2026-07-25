@@ -7,14 +7,14 @@ import {
   CopyObjectCommand,
 } from "@aws-sdk/client-s3";
 
-export type SlopRecord = {
+export type PageRecord = {
   id: string;
   title: string;
   createdAt: string;
   shared: boolean;
 };
 
-const PREFIX = "slops/";
+const PREFIX = "pages/";
 
 export function getClient() {
   const accountId = process.env.R2_ACCOUNT_ID;
@@ -93,11 +93,11 @@ function getPublicUrl(id: string): string {
   return base ? `${base}/view/${id}` : `/view/${id}`;
 }
 
-export async function deploySlop(
+export async function deployPage(
   html: string,
   title?: string,
   shared = false,
-): Promise<SlopRecord & { url: string }> {
+): Promise<PageRecord & { url: string }> {
   const { client, bucket } = getClient();
   const id = makeId(title, shared);
 
@@ -127,7 +127,7 @@ export async function deploySlop(
 export async function setShared(
   id: string,
   shared: boolean,
-): Promise<SlopRecord & { url: string }> {
+): Promise<PageRecord & { url: string }> {
   const { client, bucket } = getClient();
   const next = withShare(id, shared);
 
@@ -153,16 +153,16 @@ export async function setShared(
   };
 }
 
-export async function listSlops(
+export async function listPages(
   limit = 50,
   cursor?: string,
-): Promise<{ items: (SlopRecord & { url: string })[]; nextCursor?: string }> {
+): Promise<{ items: (PageRecord & { url: string })[]; nextCursor?: string }> {
   const { client, bucket } = getClient();
 
   // R2 lists lexicographically, so newest-first needs every key in hand before
   // slicing. ponytail: full scan per request; move to a date-ordered key prefix
   // if this bucket ever holds enough pages for the scan to hurt.
-  const all: SlopRecord[] = [];
+  const all: PageRecord[] = [];
   let token: string | undefined;
   do {
     const res = await client.send(
@@ -196,12 +196,12 @@ export async function listSlops(
   };
 }
 
-export async function deleteSlop(id: string): Promise<void> {
+export async function deletePage(id: string): Promise<void> {
   const { client, bucket } = getClient();
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: keyOf(id) }));
 }
 
-export async function getSlopHtml(id: string): Promise<string | null> {
+export async function getPageHtml(id: string): Promise<string | null> {
   const { client, bucket } = getClient();
   try {
     const res = await client.send(

@@ -10,30 +10,29 @@ export default function Home() {
           </span>
         </h1>
         <p className="text-surface-400 mx-auto mt-6 max-w-2xl text-lg">
-          A private HTML vault for AI agents. Give any agent a single MCP server, and it
-          can deploy HTML pages directly to your Cloudflare R2 storage. No API keys to
-          paste. No dashboard to babysit.
+          A private HTML vault for AI agents. One hosted MCP endpoint, your own Cloudflare
+          R2 bucket. Nothing to clone, nothing to run locally, and no dashboard to guard.
         </p>
         <div className="mt-10 flex items-center justify-center gap-4">
           <a
-            href="/dashboard"
+            href="/docs"
             className="bg-pagepilot-600 hover:bg-pagepilot-500 rounded-lg px-6 py-3 text-sm font-medium text-white transition"
           >
-            Go to Dashboard
+            Connect your agent
           </a>
           <a
-            href="/docs"
+            href="/unlock"
             className="border-surface-700 text-surface-300 hover:border-surface-600 rounded-lg border px-6 py-3 text-sm font-medium transition hover:text-white"
           >
-            Read the Docs
+            Unlock this browser
           </a>
         </div>
       </section>
 
       <section className="border-surface-800 grid gap-8 border-t py-20 sm:grid-cols-2 lg:grid-cols-3">
         <FeatureCard
-          title="MCP-native"
-          description="Plug into any MCP-compatible agent — Claude Code, Cursor, Command Code, OpenCode. Add one config entry and your agent deploys HTML on demand."
+          title="Hosted MCP"
+          description="A remote MCP server on your own deployment. One command in Claude Code — no repo to clone, no bun process, no absolute paths to keep in sync."
         />
         <FeatureCard
           title="Private by default"
@@ -44,8 +43,8 @@ export default function Home() {
           description="Deploy, list and delete all sit behind a single API key. Only the share links you hand out are public."
         />
         <FeatureCard
-          title="Type-safe API"
-          description="tRPC end-to-end. The same router types power your MCP server, dashboard, and any future integrations."
+          title="No UI to attack"
+          description="There is no dashboard and no management API. The MCP endpoint is the only authenticated surface, so there is one door to guard instead of three."
         />
         <FeatureCard
           title="Free to host"
@@ -62,8 +61,8 @@ export default function Home() {
         <div className="mt-12 grid gap-8 sm:grid-cols-3">
           <StepCard
             step="1"
-            title="Configure the MCP server"
-            description="One JSON block, no environment variables. Your key lives in ~/.pagepilot and every harness reads it from there."
+            title="Add the endpoint"
+            description="claude mcp add --transport http pagepilot <url> with your key as a bearer header. Same JSON works in Cursor, OpenCode and Claude Desktop."
           />
           <StepCard
             step="2"
@@ -83,7 +82,7 @@ export default function Home() {
           Ready to stop fighting deployments?
         </h2>
         <p className="text-surface-400 mx-auto mt-4 max-w-lg">
-          One MCP config. Your own R2 bucket. Your agents build, you share the links.
+          One endpoint. Your own R2 bucket. Your agents publish, you decide what leaves.
         </p>
         <a
           href="/docs"
