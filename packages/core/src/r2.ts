@@ -66,11 +66,14 @@ function keyOf(id: string): string {
 }
 
 function getPublicUrl(id: string): string {
+  let base = (process.env.PUBLIC_URL || "").replace(/\/+$/, "");
+  // VERCEL_PROJECT_PRODUCTION_URL only exists on Vercel, so its presence means a
+  // localhost PUBLIC_URL was copied out of .env.local — honouring that would hand
+  // agents dead share links, so the deployment's own domain wins.
   const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  const base = (process.env.PUBLIC_URL || (vercel ? `https://${vercel}` : "")).replace(
-    /\/+$/,
-    "",
-  );
+  if (vercel && (!base || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(base))) {
+    base = `https://${vercel}`;
+  }
   return base ? `${base}/view/${id}` : `/view/${id}`;
 }
 

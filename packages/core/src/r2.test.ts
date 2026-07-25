@@ -28,3 +28,22 @@ test("deploy -> list -> view -> delete", async () => {
 test("missing page reads as null, not a throw", async () => {
   expect(await getSlopHtml("definitely-not-a-real-id")).toBeNull();
 });
+
+// Regression: production had PUBLIC_URL=http://localhost:3000 copied from
+// .env.local, so every share link an agent got back was dead.
+test("a localhost PUBLIC_URL never wins over the Vercel domain", async () => {
+  const saved = {
+    pub: process.env.PUBLIC_URL,
+    v: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  };
+  process.env.PUBLIC_URL = "http://localhost:3000";
+  process.env.VERCEL_PROJECT_PRODUCTION_URL = "pagepilot-web.vercel.app";
+  try {
+    const page = await deploySlop("<h1>url check</h1>", "url check");
+    expect(page.url).toBe(`https://pagepilot-web.vercel.app/view/${page.id}`);
+    await deleteSlop(page.id);
+  } finally {
+    process.env.PUBLIC_URL = saved.pub;
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = saved.v;
+  }
+});
