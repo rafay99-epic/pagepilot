@@ -1,0 +1,82 @@
+apps/web/package.json
+  s_54672078f002c7::t_6d02ab244256b5 13
+tools/mcp-server/package.json
+  s_54672078f002c7::t_6d02ab244256b5 11-13
+apps/web/src/app/page.tsx
+  s_54672078f002c7::t_6b4ab4600fb283 43-44
+turbo.json
+  s_9249052ce188bd::t_a2b84e0ab4a8db 17-19
+  s_54672078f002c7::t_741764f2e1fbe8 6,13-14
+.gitignore
+  s_54672078f002c7::t_08c116acc6d53c 9
+README.md
+  s_54672078f002c7::t_33ef00246116ee 65-89
+  s_54672078f002c7::t_e86c5588f26e8f 13-17
+  s_54672078f002c7::t_1414169c52447b 22-24,40
+  s_54672078f002c7::t_86693fabf7a266 26-33
+apps/web/src/app/dashboard/error.tsx
+  s_54672078f002c7::t_86693fabf7a266 15,17
+tools/mcp-server/src/index.ts
+  s_54672078f002c7::t_b18c72e148fd11 2-4,8-12,18,23,25,27-41,43-63,65-80,82-83
+packages/core/src/routers/slop.ts
+  s_54672078f002c7::t_15d3e652d165a0 2
+  s_54672078f002c7::t_407d21b23e4a90 17
+  s_54672078f002c7::t_0d3d05341f9343 28
+packages/core/package.json
+  s_54672078f002c7::t_37dfa74eea00db 21
+apps/web/next.config.ts
+  s_54672078f002c7::t_f349148516022f 4-5
+packages/core/src/r2.ts
+  s_54672078f002c7::t_0d5276b74f91fb 40,42-44,49-50,56-61
+  s_54672078f002c7::t_86693fabf7a266 70-73
+  s_54672078f002c7::t_7025a83acc3d16 6,15,39,41,45-48,53-55,64-65,69,82,87,89,93,95,97,104,107-135,138-139,145,151-153
+  s_54672078f002c7::t_81e1b89c5cce54 62-63
+apps/web/src/app/layout.tsx
+  s_54672078f002c7::t_48d20d956e329b 37
+packages/core/src/r2.test.ts
+  s_54672078f002c7::t_66b762d15726b5 9,15-17
+  s_54672078f002c7::t_f623d23dc2b9c8 1-8,10-14,18-30
+apps/web/src/trpc/provider.tsx
+  s_54672078f002c7::t_ed39dee00ac5b9 8-18
+  s_54672078f002c7::t_e6ee4e3cc3edb5 26-29
+apps/web/src/app/docs/page.tsx
+  s_54672078f002c7::t_86693fabf7a266 13-14,17-24,168-170,172-180,183-189,192-194,196-197,202-207,224-226,274-276
+  s_54672078f002c7::t_96b6a61c1a5d63 69
+  s_54672078f002c7::t_e6bf8eb7eb7fb6 250-256
+  s_54672078f002c7::t_f9bdcebd16524d 198-201
+.commandcode/taste/taste.md
+  s_54672078f002c7::t_86693fabf7a266 14
+package.json
+  s_54672078f002c7::t_13647593489b1d 14
+apps/web/src/app/dashboard/list.tsx
+  s_54672078f002c7::t_86693fabf7a266 72,74,132-133
+  s_54672078f002c7::t_5e26dee44327b7 4
+  s_54672078f002c7::t_a992ac9279aa67 117-131,134-151
+  s_54672078f002c7::t_1187b710483619 59-67
+bun.lock
+  s_54672078f002c7::t_8169b802d9af7c 18,46,55-56,58,261-262,279-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c58724d5dcd8b5b6f3452872081a7f7a6ee913b1",
+  "prompts": {},
+  "sessions": {
+    "s_54672078f002c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "609b1f89-caba-4862-8070-24ad80aa2752",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    },
+    "s_9249052ce188bd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fa331f4a-103f-4475-8f62-5685fb75a3d0",
+        "model": "claude-haiku-4-5-20251001"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
