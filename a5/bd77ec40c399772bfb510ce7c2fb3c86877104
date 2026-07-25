@@ -1,0 +1,53 @@
+apps/web/src/app/docs/page.tsx
+  s_54672078f002c7::t_74fb2d46d94e4e 104-105
+  s_54672078f002c7::t_0edee157c31b6a 1-2,9,13-18,20-23,27-30,32-35,41-43,45-87,92-93,97,100,109-110,114-115,119-120,125,127,130-149,154,156-157,166,169-171,183-187,190,195,197,202,204-208,244,259,278-280
+  s_54672078f002c7::t_679e37b39dc202 36-37,128-129,150-152,174-175,178-179
+apps/web/src/app/unlock/page.tsx
+  s_54672078f002c7::t_679e37b39dc202 16-18
+  s_54672078f002c7::t_9b3fdda54f425a 1-15,19-63
+packages/core/package.json
+  s_54672078f002c7::t_327926006a5185 8
+packages/core/src/r2.ts
+  s_54672078f002c7::t_0d1a94baa2f3a9 10,17,96,100,130,156,159,165,199,204
+apps/web/src/app/view/[id]/route.ts
+  s_54672078f002c7::t_9e71738c49b450 2,17
+packages/core/src/r2.test.ts
+  s_54672078f002c7::t_0d1a94baa2f3a9 7-10,20,27,29,32-33,37,42,52,61-62,68-69,71,74,79,100,102
+apps/web/package.json
+  s_54672078f002c7::t_327926006a5185 13
+apps/web/src/app/layout.tsx
+  s_54672078f002c7::t_66730eae610381 26,29
+apps/web/src/app/page.tsx
+  s_54672078f002c7::t_679e37b39dc202 13-14
+  s_54672078f002c7::t_a697332b835b2b 18,21,24,27,34-35,46-47,64-65,85
+apps/web/src/app/api/unlock/route.ts
+  s_54672078f002c7::t_03759a84422b30 4-8,10-11,13-19,22-32,42
+apps/web/src/app/api/mcp/route.ts
+  s_54672078f002c7::t_679e37b39dc202 114-117
+  s_54672078f002c7::t_0239525d5abe87 1-42,47-50,53,56,59-113,118-141
+  s_54672078f002c7::t_bfb21d0a9e368a 43-46,51-52,54-55,57-58
+README.md
+  s_54672078f002c7::t_2b9cf4f1e0a80a 3-4,7-9,13-14,20-25,29-32,39-40,43-46,49,52,54,57-59,62-63,69-71,77,79-81,87,89-90,93-97,99-100,106,110-120,122-123
+  s_54672078f002c7::t_679e37b39dc202 12,27,36
+  s_54672078f002c7::t_7bb0338e07f800 26
+package.json
+  s_54672078f002c7::t_327926006a5185 6
+bun.lock
+  s_54672078f002c7::t_b95b149b60b8da 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "a5bd77ec40c399772bfb510ce7c2fb3c86877104",
+  "prompts": {},
+  "sessions": {
+    "s_54672078f002c7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "609b1f89-caba-4862-8070-24ad80aa2752",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
