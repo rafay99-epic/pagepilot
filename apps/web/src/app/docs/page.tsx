@@ -13,8 +13,8 @@ export default function Docs() {
       <Section title="How this works">
         <p className="text-surface-400">
           PagePilot is an MCP server that happens to have a landing page. Everything —
-          publishing, listing, sharing, deleting — happens through MCP tools your agent
-          calls. There is no management UI, on purpose: a dashboard would be one more
+          publishing, listing, deleting — happens through MCP tools your agent calls.
+          There is no dashboard and no login, on purpose: a UI would be one more
           authenticated surface guarding the same bucket.
         </p>
         <p className="text-surface-400 mt-3">
@@ -91,29 +91,10 @@ export default function Docs() {
             args={[
               { name: "html", type: "string", desc: "Full HTML content (required)" },
               { name: "title", type: "string", desc: "Label shown in the list" },
-              {
-                name: "share",
-                type: "boolean",
-                desc: "Readable by anyone with the link. Defaults to false (private)",
-              },
             ]}
-            returns="id, title, url, shared, createdAt"
+            returns="id, title, url, createdAt"
           />
-          <ToolDoc
-            name="list_pages"
-            args={[]}
-            returns="The 200 newest pages, each with its shared state"
-          />
-          <ToolDoc
-            name="share_page"
-            args={[{ name: "id", type: "string", desc: "Page to make public" }]}
-            returns="A new id and public url — use the url this returns"
-          />
-          <ToolDoc
-            name="unshare_page"
-            args={[{ name: "id", type: "string", desc: "Page to make private again" }]}
-            returns="A new private id. The previous public link stops working."
-          />
+          <ToolDoc name="list_pages" args={[]} returns="The 200 newest pages" />
           <ToolDoc
             name="delete_page"
             args={[{ name: "id", type: "string", desc: "Page to remove" }]}
@@ -122,34 +103,26 @@ export default function Docs() {
         </div>
       </Section>
 
-      <Section title="Private by default">
+      <Section title="Who can read a page">
         <p className="text-surface-400">
-          A published page answers <code className="text-surface-300">404</code> to anyone
-          who isn&apos;t you — not <code className="text-surface-300">401</code>, so a
-          guess can&apos;t even confirm the id exists.
+          Anyone holding the link. There is no login and no cookie — the 48-bit id in the
+          URL <em>is</em> the credential, so a page is exactly as private as its link.
         </p>
         <p className="text-surface-400 mt-3">
-          To read your own pages in a browser, visit{" "}
-          <a href="/unlock" className="text-pagepilot-400 underline">
-            /unlock
-          </a>{" "}
-          once and enter your key. It becomes an{" "}
-          <code className="text-surface-300">httpOnly</code> cookie, so no script on the
-          page can read it. That page is the only UI here and it manages nothing.
+          That means nobody can find your pages by guessing or crawling, but whoever you
+          send a link to can forward it, and Slack, Discord and Notion all fetch a URL
+          server-side to build previews. Pages send{" "}
+          <code className="text-surface-300">X-Robots-Tag: noindex</code> and{" "}
+          <code className="text-surface-300">robots.txt</code> disallows{" "}
+          <code className="text-surface-300">/p/</code>, so a leaked link still can&apos;t
+          become a search result. When you want a page gone, call{" "}
+          <code className="text-surface-300">delete_page</code> — the URL dies
+          immediately.
         </p>
         <p className="text-surface-400 mt-3">
-          When you want to send someone a page, call{" "}
-          <code className="text-surface-300">share_page</code> — that mints a new public
-          URL. <code className="text-surface-300">unshare_page</code> revokes it, and the
-          old link stops working immediately rather than merely becoming hidden.
-        </p>
-        <p className="text-surface-400 mt-3 text-sm">
-          Shared pages still send{" "}
-          <code className="text-surface-300">X-Robots-Tag: noindex</code> and are excluded
-          by <code className="text-surface-300">robots.txt</code>, so a leaked link
-          can&apos;t become a search result. It is still a link, though: whoever you send
-          it to can forward it, and Slack, Discord and Notion fetch it server-side to
-          build previews. Unshare when you&apos;re done.
+          Your <code className="text-surface-300">PAGEPILOT_API_KEY</code> guards
+          publishing, listing and deleting. Without it nobody can enumerate your vault or
+          write to it, even though individual links are readable.
         </p>
       </Section>
 

@@ -3,80 +3,55 @@
  *   bun --env-file=../../.env.local test
  */
 import { expect, test } from "bun:test";
-import {
-  deployPage,
-  listPages,
-  deletePage,
-  getPageHtml,
-  setShared,
-  isSharedId,
-} from "./r2";
+import { deployPage, listPages, deletePage, getPageHtml } from "./r2";
 import { isValidKey } from "./auth";
 
-test("deploy -> list -> view -> delete", async () => {
+test("deploy -> read -> list -> delete", async () => {
   const title = 'Plan: "R2" & co / 50% ~ done — café 🚀';
   const html = "<h1>hi</h1>";
 
   const page = await deployPage(html, title);
-  expect(page.title).toBe(title); // survives key encode/decode
-  expect(page.url).toContain(page.id);
-  // An id lands in a URL path segment, so it must need no escaping at all —
-  // a percent-encoded "/" here would get split back out by the router.
-  expect(encodeURIComponent(page.id)).toBe(page.id);
+  expect(page.title).toBe(title); // survives the base64url round trip in the key
+
+  // The id goes in a URL people paste around: hex only, nothing to escape, and
+  // short enough to read out loud.
+  expect(page.id).toMatch(/^[0-9a-f]{12}$/);
+  expect(page.url.endsWith(`/p/${page.id}`)).toBe(true);
 
   expect(await getPageHtml(page.id)).toBe(html);
 
-  const listed = (await listPages(100)).items.find((p) => p.id === page.id);
+  const listed = (await listPages(200)).items.find((p) => p.id === page.id);
   expect(listed?.title).toBe(title);
 
-  await deletePage(page.id);
+  expect(await deletePage(page.id)).toBe(true);
   expect(await getPageHtml(page.id)).toBeNull();
-});
+}, 20_000);
 
-test("pages are private unless asked otherwise, and unmarked ids fail closed", async () => {
-  const page = await deployPage("<h1>secret</h1>", "secret plan");
+test("a page with no title still round-trips", async () => {
+  const page = await deployPage("<h1>untitled</h1>");
   try {
-    expect(page.shared).toBe(false);
-    expect(isSharedId(page.id)).toBe(false);
+    expect(page.id).toMatch(/^[0-9a-f]{12}$/);
+    expect(await getPageHtml(page.id)).toBe("<h1>untitled</h1>");
   } finally {
     await deletePage(page.id);
   }
-  // Anything the share marker doesn't vouch for must not be treated as public.
-  expect(isSharedId("a1b2c3d4e5f6")).toBe(false);
-  expect(isSharedId("p-a1b2c3d4e5f6")).toBe(false);
-  expect(isSharedId("s-a1b2c3d4e5f6")).toBe(true);
-});
+}, 20_000);
 
-test("sharing flips the id so unsharing revokes the old link", async () => {
-  const title = "shared / plan ~ café";
-  const page = await deployPage("<h1>share me</h1>", title);
-  let current = page.id;
+test("one id can't collide with a longer one sharing its prefix", async () => {
+  // resolveKey anchors on the "~" separator; without it, id "abc" would resolve
+  // to a page whose id happens to start with "abc".
+  const page = await deployPage("<h1>anchored</h1>", "anchored");
   try {
-    const shared = await setShared(current, true);
-    current = shared.id;
-    expect(shared.shared).toBe(true);
-    expect(isSharedId(shared.id)).toBe(true);
-    expect(shared.title).toBe(title); // title survives the copy
-    expect(shared.id).not.toBe(page.id); // old URL is dead
-    expect(await getPageHtml(page.id)).toBeNull();
-    expect(await getPageHtml(shared.id)).toBe("<h1>share me</h1>");
-    expect(encodeURIComponent(shared.id)).toBe(shared.id);
-
-    const back = await setShared(current, false);
-    current = back.id;
-    expect(isSharedId(back.id)).toBe(false);
-    expect(await getPageHtml(shared.id)).toBeNull(); // revoked
-    expect(await getPageHtml(back.id)).toBe("<h1>share me</h1>");
-
-    const listed = (await listPages(100)).items.find((p) => p.id === back.id);
-    expect(listed?.shared).toBe(false);
+    expect(await getPageHtml(page.id.slice(0, 6))).toBeNull();
+    expect(await getPageHtml(page.id)).toBe("<h1>anchored</h1>");
   } finally {
-    await deletePage(current);
+    await deletePage(page.id);
   }
-}, 30_000); // ~10 sequential R2 round trips
+}, 20_000);
 
-test("missing page reads as null, not a throw", async () => {
-  expect(await getPageHtml("definitely-not-a-real-id")).toBeNull();
+test("missing page reads as null and deletes as false", async () => {
+  expect(await getPageHtml("ffffffffffff")).toBeNull();
+  expect(await deletePage("ffffffffffff")).toBe(false);
 });
 
 test("key check rejects empty, wrong and near-miss keys", () => {
@@ -88,7 +63,7 @@ test("key check rejects empty, wrong and near-miss keys", () => {
 });
 
 // Regression: production had PUBLIC_URL=http://localhost:3000 copied from
-// .env.local, so every share link an agent got back was dead.
+// .env.local, so every link an agent got back was dead.
 test("a localhost PUBLIC_URL never wins over the Vercel domain", async () => {
   const saved = {
     pub: process.env.PUBLIC_URL,
@@ -98,10 +73,10 @@ test("a localhost PUBLIC_URL never wins over the Vercel domain", async () => {
   process.env.VERCEL_PROJECT_PRODUCTION_URL = "pagepilot.rafay99.com";
   try {
     const page = await deployPage("<h1>url check</h1>", "url check");
-    expect(page.url).toBe(`https://pagepilot.rafay99.com/view/${page.id}`);
+    expect(page.url).toBe(`https://pagepilot.rafay99.com/p/${page.id}`);
     await deletePage(page.id);
   } finally {
     process.env.PUBLIC_URL = saved.pub;
     process.env.VERCEL_PROJECT_PRODUCTION_URL = saved.v;
   }
-});
+}, 20_000);

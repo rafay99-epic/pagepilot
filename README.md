@@ -6,11 +6,11 @@
 ```
 AI Agent ──HTTP──> /api/mcp (MCP server, hosted) ──S3 SDK──> Cloudflare R2
                         │
-                   /view/<id>  ← private by default, shareable on request
+                     /p/<id>  ← short link, readable by anyone holding it
 ```
 
-The MCP server _is_ the application. There is no management UI and no separate API —
-publishing, listing, sharing and deleting all happen through MCP tools, so there is one
+The MCP server _is_ the application. There is no dashboard, no login and no separate API —
+publishing, listing and deleting all happen through MCP tools, so there is one
 authenticated surface instead of three.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/rafay99-epic/pagepilot&root-directory=apps/web&env=R2_ACCOUNT_ID,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY,R2_BUCKET,PAGEPILOT_API_KEY)
@@ -76,40 +76,35 @@ takes the same thing:
 
 ## Tools
 
-- `deploy_page(html, title?, share?)` — Publish HTML. **Private unless `share: true`.**
-- `list_pages()` — The vault, newest first, with each page's shared state
-- `share_page(id)` — Mint a public link. Returns a **new** id and URL.
-- `unshare_page(id)` — Revoke the public link. The old URL dies immediately.
-- `delete_page(id)` — Delete a page
+- `deploy_page(html, title?)` — Publish HTML, get back a short URL
+- `list_pages()` — The vault, newest first
+- `delete_page(id)` — Delete a page. The URL dies immediately.
 
 ## Access model
 
-`PAGEPILOT_API_KEY` guards the MCP endpoint. Agents send it as `Authorization: Bearer`.
+`PAGEPILOT_API_KEY` guards the MCP endpoint — publishing, listing and deleting. Agents
+send it as `Authorization: Bearer`. Without it nobody can enumerate your vault or write to
+it.
 
-Pages are **private by default**. `/view/<id>` answers `404` unless the page is shared or
-the caller is authenticated — `404` rather than `401` so a guess can't confirm an id
-exists, and the check runs before touching R2 so probing costs nothing.
+**Reading a page is unauthenticated.** There is no login and no cookie: the 12-character,
+48-bit id in `/p/<id>` _is_ the credential, so a page is exactly as private as its link.
+Nobody finds pages by guessing or crawling, and every page sends
+`X-Robots-Tag: noindex, nofollow, noarchive` with `robots.txt` disallowing `/p/`, so a
+leaked link can't become a search result.
 
-To read your own pages in a browser, visit `/unlock` once and enter the key. It becomes an
-`httpOnly` `Secure` `SameSite=Lax` cookie: `httpOnly` so no page script can read your key,
-`SameSite=Lax` so a hostile site can't act as you. That page is the only UI in the app and
-it manages nothing.
-
-`share_page` makes one page readable by anyone holding its link. Shared pages still send
-`X-Robots-Tag: noindex, nofollow, noarchive` and `robots.txt` disallows `/view/`, so a
-leaked link can't become a search result. Be clear-eyed about what a shared link is:
-anyone you send it to can forward it, and Slack, Discord and Notion all fetch it
-server-side to build previews. Share deliberately, unshare when done.
+Be clear-eyed about what that is, though: whoever you send a link to can forward it, and
+Slack, Discord and Notion all fetch a URL server-side to build previews. If a page should
+stop being readable, `delete_page` it.
 
 ## Storage layout
 
-One object per page: `pages/<p|s>-<random>~<base64url title>.html`.
+One object per page: `pages/<id>~<base64url title>.html`, where `<id>` is 12 hex
+characters.
 
-Share state and title both live in the key, so a single `ListObjectsV2` answers what
-exists, what it's called and what's public — no index file for concurrent agents to
-clobber, and no per-item `HeadObject`. Flipping share state rewrites the id, which is why
-unsharing genuinely revokes a link instead of just hiding it. Anything without an `s-`
-marker is treated as private, so unrecognised ids fail closed.
+The id alone goes in the URL, so links stay short. The title still lives in the key, which
+keeps listing to a single `ListObjectsV2` — no index file for concurrent agents to clobber
+and no per-item `HeadObject`. Reading one page costs a prefix list to recover the key,
+anchored on the `~` so a short id can't match a longer one.
 
 ## Local development
 

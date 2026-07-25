@@ -21,10 +21,10 @@ export default function Home() {
             Connect your agent
           </a>
           <a
-            href="/unlock"
+            href="https://github.com/rafay99-epic/pagepilot"
             className="border-surface-700 text-surface-300 hover:border-surface-600 rounded-lg border px-6 py-3 text-sm font-medium transition hover:text-white"
           >
-            Unlock this browser
+            Source
           </a>
         </div>
       </section>
@@ -35,16 +35,16 @@ export default function Home() {
           description="A remote MCP server on your own deployment. One command in Claude Code — no repo to clone, no bun process, no absolute paths to keep in sync."
         />
         <FeatureCard
-          title="Private by default"
-          description="A deployed page is readable only by you. Sharing is an explicit act, and unsharing revokes the link for anyone already holding it."
+          title="Short, unguessable links"
+          description="Every page gets a 12-character URL backed by 48 bits of randomness. Nobody finds your pages by guessing or crawling, and nothing is indexed."
         />
         <FeatureCard
           title="One key, whole vault"
-          description="Deploy, list and delete all sit behind a single API key. Only the share links you hand out are public."
+          description="Publishing, listing and deleting all sit behind a single API key, so nobody can enumerate or write to your vault."
         />
         <FeatureCard
           title="No UI to attack"
-          description="There is no dashboard and no management API. The MCP endpoint is the only authenticated surface, so there is one door to guard instead of three."
+          description="No dashboard, no login, no management API. The MCP endpoint is the only authenticated surface, so there is one door to guard instead of three."
         />
         <FeatureCard
           title="Free to host"
@@ -71,8 +71,8 @@ export default function Home() {
           />
           <StepCard
             step="3"
-            title="Read it, then share it if you want"
-            description="The agent calls deploy_page(html) and the page is private to you. Call share_page when you actually want a link someone else can open."
+            title="Get a link"
+            description="The agent calls deploy_page(html) and hands back a short URL. Open it, send it, or delete_page it when you are done."
           />
         </div>
       </section>
@@ -82,7 +82,7 @@ export default function Home() {
           Ready to stop fighting deployments?
         </h2>
         <p className="text-surface-400 mx-auto mt-4 max-w-lg">
-          One endpoint. Your own R2 bucket. Your agents publish, you decide what leaves.
+          One endpoint. Your own R2 bucket. Your agents publish, you get a link.
         </p>
         <a
           href="/docs"

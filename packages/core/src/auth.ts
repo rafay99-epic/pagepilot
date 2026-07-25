@@ -1,25 +1,10 @@
-export const SESSION_COOKIE = "pagepilot_session";
-
 /**
- * Two ways in, one secret: the MCP server sends `authorization: Bearer <key>`,
- * a browser sends an httpOnly cookie set by /api/unlock. The cookie is httpOnly
- * so page scripts can't read the key, and SameSite=Lax keeps it off cross-site
- * POSTs, which is what stops a hostile page from deleting your vault.
- *
- * ponytail: the cookie value is the key itself rather than a derived session
- * token, so there is nothing to revoke but the key. Issue real sessions if this
- * ever has more than one holder.
+ * One secret, one way in: the MCP endpoint requires `Authorization: Bearer <key>`.
+ * Page viewing is deliberately unauthenticated — the URL is the capability.
  */
-export function presentedKey(req: Request): string {
+function presentedKey(req: Request): string {
   const header = req.headers.get("authorization") || "";
-  if (header.startsWith("Bearer ")) return header.slice(7);
-
-  const cookies = req.headers.get("cookie") || "";
-  for (const part of cookies.split(";")) {
-    const [name, ...rest] = part.trim().split("=");
-    if (name === SESSION_COOKIE) return decodeURIComponent(rest.join("="));
-  }
-  return "";
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
 }
 
 /** Constant-time compare so a wrong key can't be narrowed down by timing. */
