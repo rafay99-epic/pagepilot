@@ -1,21 +1,15 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
+import { isAuthed } from "./auth";
 
 export function createContext(opts: FetchCreateContextFnOptions) {
-  return {
-    authorization: opts.req.headers.get("authorization") || "",
-  };
+  return { authed: isAuthed(opts.req) };
 }
 
 const t = initTRPC.context<typeof createContext>().create();
 
 const authMiddleware = t.middleware(({ ctx, next }) => {
-  const apiKey = ctx.authorization.replace("Bearer ", "");
-  const expected = process.env.PAGEPILOT_API_KEY;
-
-  if (!expected || apiKey !== expected) {
-    throw new TRPCError({ code: "UNAUTHORIZED" });
-  }
+  if (!ctx.authed) throw new TRPCError({ code: "UNAUTHORIZED" });
   return next();
 });
 

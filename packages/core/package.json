@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./r2": "./src/r2.ts",
+    "./auth": "./src/auth.ts",
     "./trpc": "./src/trpc.ts",
     "./routers/_app": "./src/routers/_app.ts"
   },

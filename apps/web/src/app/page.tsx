@@ -37,7 +37,7 @@ export default function Home() {
         />
         <FeatureCard
           title="Private by default"
-          description="Every HTML page is stored in your own Cloudflare R2 bucket. You control access. No third party sees your content."
+          description="A deployed page is readable only by you. Sharing is an explicit act, and unsharing revokes the link for anyone already holding it."
         />
         <FeatureCard
           title="One key, whole vault"
@@ -53,7 +53,7 @@ export default function Home() {
         />
         <FeatureCard
           title="Works with any LLM"
-          description="Claude, GPT, Gemini, open models — if the agent supports MCP tools, it can call deploy_slop and get a URL back."
+          description="Claude, GPT, Gemini, open models — if the agent supports MCP tools, it can call deploy_page and get a URL back."
         />
       </section>
 
@@ -63,7 +63,7 @@ export default function Home() {
           <StepCard
             step="1"
             title="Configure the MCP server"
-            description="Add PagePilot to your agent's MCP config. One JSON block, two environment variables."
+            description="One JSON block, no environment variables. Your key lives in ~/.pagepilot and every harness reads it from there."
           />
           <StepCard
             step="2"
@@ -72,8 +72,8 @@ export default function Home() {
           />
           <StepCard
             step="3"
-            title="Get a shareable URL"
-            description="The agent calls deploy_slop(html). PagePilot uploads to R2 and returns a URL. Done."
+            title="Read it, then share it if you want"
+            description="The agent calls deploy_page(html) and the page is private to you. Call share_page when you actually want a link someone else can open."
           />
         </div>
       </section>

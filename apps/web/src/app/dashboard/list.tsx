@@ -1,8 +1,7 @@
 "use client";
 
 import { trpc } from "@/trpc/client";
-import { setApiKey } from "@/trpc/provider";
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { SlopRow } from "./slop-row";
 
 const PAGE_SIZE = 25;
@@ -115,22 +114,27 @@ export default function DashboardList() {
 }
 
 function KeyForm() {
+  const [rejected, setRejected] = useState(false);
+
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         const key = new FormData(e.currentTarget).get("key");
-        if (typeof key === "string" && key) {
-          setApiKey(key);
-          window.location.reload();
-        }
+        if (typeof key !== "string" || !key) return;
+        const res = await fetch("/api/unlock", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key }),
+        });
+        if (res.ok) window.location.reload();
+        else setRejected(true);
       }}
       className="border-surface-800 bg-surface-900/50 mx-auto max-w-sm rounded-xl border p-8 text-center"
     >
       <p className="text-surface-300">This vault is locked.</p>
       <p className="text-surface-600 mt-1 text-sm">
-        Enter your <code>PAGEPILOT_API_KEY</code> to view your pages. It is kept in this
-        browser only.
+        Enter your <code>PAGEPILOT_API_KEY</code> to unlock it in this browser.
       </p>
       <input
         name="key"
@@ -145,6 +149,7 @@ function KeyForm() {
       >
         Unlock
       </button>
+      {rejected && <p className="mt-3 text-sm text-red-500">That key was rejected.</p>}
     </form>
   );
 }
