@@ -1,46 +1,99 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
+import { cn } from "@/lib/utils";
+import { site } from "@/lib/site";
+import { GithubIcon, Logo, LogoMark } from "@/components/logo";
+import { Button } from "@/components/ui/button";
+
+const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
+
+const title = `${site.name} — Private HTML Vault for AI Agents`;
 
 export const metadata: Metadata = {
-  title: "PagePilot — Private HTML Vault for AI Agents",
-  description:
-    "Deploy HTML pages from any AI agent via MCP. Stored in Cloudflare R2, served on Vercel.",
+  metadataBase: new URL(site.url),
+  title: { default: title, template: `%s — ${site.name}` },
+  description: site.description,
+  applicationName: site.name,
+  keywords: [
+    "MCP server",
+    "Model Context Protocol",
+    "AI agent hosting",
+    "deploy HTML",
+    "Claude Code MCP",
+    "Cloudflare R2",
+    "static page hosting",
+    "PagePilot",
+  ],
+  authors: [{ name: "Abdul Rafay", url: site.repo }],
+  creator: "Abdul Rafay",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: site.name,
+    url: site.url,
+    title,
+    description: site.description,
+    locale: "en_US",
+  },
+  twitter: { card: "summary_large_image", title, description: site.description },
+  robots: { index: true, follow: true },
+  category: "technology",
 };
+
+export const viewport: Viewport = { themeColor: "#0b0b12", colorScheme: "dark" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="bg-surface-950 text-surface-200 min-h-screen font-sans antialiased">
-        <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 sm:px-6 lg:px-8">
-          <header className="flex items-center justify-between py-6">
-            <a href="/" className="flex items-center gap-2">
-              <span className="text-xl font-bold tracking-tight text-white">
-                PagePilot
-              </span>
-            </a>
-            <nav className="flex items-center gap-6 text-sm">
-              <a href="/docs" className="text-surface-400 transition hover:text-white">
+    <html lang="en" className={cn("dark", geist.variable, geistMono.variable)}>
+      <body className="bg-background text-foreground min-h-screen font-sans antialiased">
+        <header className="border-border/60 bg-background/70 sticky top-0 z-50 border-b backdrop-blur-xl">
+          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
+            <Link href="/" aria-label={`${site.name} home`}>
+              <Logo />
+            </Link>
+            <nav className="flex items-center gap-1 sm:gap-2">
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/docs">Docs</Link>
+              </Button>
+              <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
+                <Link href="/docs#run-your-own">Self-host</Link>
+              </Button>
+              <Button size="sm" asChild>
+                <a href={site.repo} target="_blank" rel="noreferrer noopener">
+                  <GithubIcon />
+                  GitHub
+                </a>
+              </Button>
+            </nav>
+          </div>
+        </header>
+
+        <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">{children}</main>
+
+        <footer className="border-border/60 mt-24 border-t">
+          <div className="text-muted-foreground mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 py-10 text-sm sm:flex-row sm:px-6 lg:px-8">
+            <span className="flex items-center gap-2">
+              <LogoMark className="size-5" radius={6} />
+              {site.name} — a private HTML vault for AI agents
+            </span>
+            <span className="flex items-center gap-5">
+              <Link href="/docs" className="hover:text-foreground transition">
                 Docs
-              </a>
+              </Link>
               <a
-                href="https://github.com/rafay99-epic/pagepilot"
-                className="bg-pagepilot-600 hover:bg-pagepilot-500 rounded-lg px-4 py-2 text-sm font-medium text-white transition"
+                href={site.repo}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="hover:text-foreground transition"
               >
                 GitHub
               </a>
-            </nav>
-          </header>
-          <main className="flex-1">{children}</main>
-          <footer className="border-surface-800 text-surface-600 border-t py-8 text-center text-sm">
-            PagePilot &mdash; private HTML vault for AI agents &mdash;{" "}
-            <a
-              href="https://github.com/rafay99-epic/pagepilot"
-              className="text-surface-400 transition hover:text-white"
-            >
-              GitHub
-            </a>
-          </footer>
-        </div>
+            </span>
+          </div>
+        </footer>
       </body>
     </html>
   );
