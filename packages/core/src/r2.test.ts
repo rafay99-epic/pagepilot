@@ -3,7 +3,14 @@
  *   bun --env-file=../../.env.local test
  */
 import { expect, test } from "bun:test";
-import { deployPage, listPages, deletePage, getPageHtml } from "./r2";
+import {
+  deployPage,
+  listPages,
+  deletePage,
+  getPageHtml,
+  getStorageStats,
+  renamePage,
+} from "./r2";
 import { isValidKey } from "./auth";
 
 test("deploy -> read -> list -> delete", async () => {
@@ -37,6 +44,18 @@ test("a page with no title still round-trips", async () => {
   }
 }, 20_000);
 
+test("renaming keeps the page content and updates its listing", async () => {
+  const page = await deployPage("<h1>rename me</h1>", "Before");
+  try {
+    expect(await renamePage(page.id, "After")).toBe(true);
+    expect(await getPageHtml(page.id)).toBe("<h1>rename me</h1>");
+    const listed = (await listPages(200)).items.find((item) => item.id === page.id);
+    expect(listed?.title).toBe("After");
+  } finally {
+    await deletePage(page.id);
+  }
+}, 20_000);
+
 test("one id can't collide with a longer one sharing its prefix", async () => {
   // resolveKey anchors on the "~" separator; without it, id "abc" would resolve
   // to a page whose id happens to start with "abc".
@@ -52,6 +71,24 @@ test("one id can't collide with a longer one sharing its prefix", async () => {
 test("missing page reads as null and deletes as false", async () => {
   expect(await getPageHtml("ffffffffffff")).toBeNull();
   expect(await deletePage("ffffffffffff")).toBe(false);
+});
+
+test("listing uses an R2 cursor instead of scanning the whole bucket", async () => {
+  const first = await listPages(1);
+  expect(first.items.length).toBeLessThanOrEqual(1);
+  if (!first.nextCursor) return;
+
+  const second = await listPages(1, first.nextCursor);
+  expect(second.items.length).toBeLessThanOrEqual(1);
+  expect(second.items[0]?.id).not.toBe(first.items[0]?.id);
+});
+
+test("storage history ends at the current totals", async () => {
+  const storage = await getStorageStats();
+  expect(storage.history).toHaveLength(30);
+  expect(storage.history.at(-1)?.bytes).toBe(storage.bytes);
+  expect(storage.history.at(-1)?.files).toBe(storage.files);
+  expect(storage.history[0]!.date < storage.history.at(-1)!.date).toBe(true);
 });
 
 test("key check rejects empty, wrong and near-miss keys", () => {

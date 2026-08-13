@@ -21,6 +21,22 @@ export async function GET(
       // turn up in a search index.
       "x-robots-tag": "noindex, nofollow, noarchive",
       "cache-control": "private, no-store",
+      "content-security-policy": [
+        "sandbox allow-scripts allow-popups",
+        "default-src 'none'",
+        "script-src 'unsafe-inline' https:",
+        "style-src 'unsafe-inline' https:",
+        "img-src data: blob: https:",
+        "font-src data: https:",
+        "connect-src https:",
+        "media-src blob: https:",
+        "frame-src https:",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+      ].join("; "),
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
     },
   });
 }
