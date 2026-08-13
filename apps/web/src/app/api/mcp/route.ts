@@ -36,16 +36,15 @@ function buildServer() {
     "list_pages",
     {
       description:
-        "List the pages in the vault, newest first, with titles, IDs, URLs and " +
-        "creation dates",
+        "List up to 100 pages in the vault with titles, IDs, URLs and creation dates",
     },
     async () => {
-      const { items, truncated } = await listPages(200);
+      const { items, nextCursor } = await listPages(100);
       if (items.length === 0) return text("The vault is empty.");
       const body = items
         .map((p, i) => `${i + 1}. ${p.title}\n   ${p.url}\n   ${p.id} — ${p.createdAt}`)
         .join("\n");
-      return text(truncated ? `${body}\n\n(showing the 200 newest)` : body);
+      return text(nextCursor ? `${body}\n\n(showing the first 100)` : body);
     },
   );
 

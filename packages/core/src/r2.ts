@@ -4,6 +4,8 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   ListObjectsV2Command,
+  CopyObjectCommand,
+  DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 
 export type PageRecord = {
@@ -13,8 +15,16 @@ export type PageRecord = {
 };
 
 const PREFIX = "pages/";
+const MAX_HTML_BYTES = 900_000;
+
+let cachedClient: ReturnType<typeof createClient> | undefined;
 
 export function getClient() {
+  cachedClient ??= createClient();
+  return cachedClient;
+}
+
+function createClient() {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
@@ -78,6 +88,7 @@ async function resolveKey(
   bucket: string,
   id: string,
 ): Promise<string | null> {
+  if (!/^[a-f0-9]{12}$/.test(id)) return null;
   // Anchored on the `~` so `abc123~` can't be matched by a longer id.
   const res = await client.send(
     new ListObjectsV2Command({
@@ -105,6 +116,9 @@ export async function deployPage(
   html: string,
   title?: string,
 ): Promise<PageRecord & { url: string }> {
+  if (Buffer.byteLength(html, "utf8") > MAX_HTML_BYTES) {
+    throw new Error("HTML exceeds the 900 KB limit");
+  }
   const { client, bucket } = getClient();
   const id = makeId();
   const key = keyOf(id, title);
@@ -127,39 +141,37 @@ export async function deployPage(
 }
 
 export async function listPages(
-  limit = 50,
-): Promise<{ items: (PageRecord & { url: string })[]; truncated: boolean }> {
+  limit = 24,
+  cursor?: string,
+): Promise<{
+  items: (PageRecord & { url: string })[];
+  nextCursor?: string;
+}> {
   const { client, bucket } = getClient();
-
-  // R2 lists lexicographically, so newest-first needs every key in hand before
-  // slicing. ponytail: full scan per call; move to a date-ordered key prefix if
-  // this bucket ever holds enough pages for the scan to hurt.
-  const all: PageRecord[] = [];
-  let token: string | undefined;
-  do {
-    const res = await client.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: PREFIX,
-        ContinuationToken: token,
-      }),
-    );
-    for (const obj of res.Contents ?? []) {
-      if (!obj.Key?.endsWith(".html")) continue;
-      all.push({
-        id: idOf(obj.Key),
-        title: titleOf(obj.Key),
+  const pageSize = Math.max(1, Math.min(limit, 100));
+  const res = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: PREFIX,
+      MaxKeys: pageSize,
+      ContinuationToken: cursor,
+    }),
+  );
+  const items = (res.Contents ?? [])
+    .filter((obj) => obj.Key?.endsWith(".html"))
+    .map((obj) => {
+      const key = obj.Key!;
+      return {
+        id: idOf(key),
+        title: titleOf(key),
         createdAt: (obj.LastModified ?? new Date(0)).toISOString(),
-      });
-    }
-    token = res.IsTruncated ? res.NextContinuationToken : undefined;
-  } while (token);
-
-  all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        url: publicUrl(idOf(key)),
+      };
+    });
 
   return {
-    items: all.slice(0, limit).map((p) => ({ ...p, url: publicUrl(p.id) })),
-    truncated: all.length > limit,
+    items,
+    nextCursor: res.IsTruncated ? res.NextContinuationToken : undefined,
   };
 }
 
@@ -168,6 +180,26 @@ export async function deletePage(id: string): Promise<boolean> {
   const key = await resolveKey(client, bucket, id);
   if (!key) return false;
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  return true;
+}
+
+export async function renamePage(id: string, title: string): Promise<boolean> {
+  const { client, bucket } = getClient();
+  const oldKey = await resolveKey(client, bucket, id);
+  if (!oldKey) return false;
+  const newKey = keyOf(id, title);
+  if (oldKey === newKey) return true;
+
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      CopySource: encodeURIComponent(`${bucket}/${oldKey}`).replace(/%2F/g, "/"),
+      Key: newKey,
+      ContentType: "text/html; charset=utf-8",
+      MetadataDirective: "REPLACE",
+    }),
+  );
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: oldKey }));
   return true;
 }
 
@@ -181,5 +213,100 @@ export async function getPageHtml(id: string): Promise<string | null> {
   } catch (e: unknown) {
     if ((e as { name?: string }).name === "NoSuchKey") return null;
     throw e;
+  }
+}
+
+export async function getStorageStats(): Promise<{
+  bucket: string;
+  files: number;
+  bytes: number;
+  history: { date: string; bytes: number; files: number }[];
+}> {
+  const { client, bucket } = getClient();
+  let files = 0;
+  let bytes = 0;
+  const objects: { bytes: number; modifiedAt: Date }[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const res = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: PREFIX,
+        ContinuationToken: cursor,
+      }),
+    );
+    for (const object of res.Contents ?? []) {
+      files += 1;
+      bytes += object.Size ?? 0;
+      objects.push({
+        bytes: object.Size ?? 0,
+        modifiedAt: object.LastModified ?? new Date(0),
+      });
+    }
+    cursor = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (cursor);
+
+  return { bucket, files, bytes, history: storageHistory(objects) };
+}
+
+function storageHistory(
+  objects: { bytes: number; modifiedAt: Date }[],
+  days = 30,
+): { date: string; bytes: number; files: number }[] {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setUTCDate(start.getUTCDate() - days + 1);
+
+  let bytes = 0;
+  let files = 0;
+  const changes = new Map<string, { bytes: number; files: number }>();
+
+  for (const object of objects) {
+    if (object.modifiedAt < start) {
+      bytes += object.bytes;
+      files += 1;
+      continue;
+    }
+    const date = object.modifiedAt.toISOString().slice(0, 10);
+    const current = changes.get(date) ?? { bytes: 0, files: 0 };
+    current.bytes += object.bytes;
+    current.files += 1;
+    changes.set(date, current);
+  }
+
+  return Array.from({ length: days }, (_, index) => {
+    const day = new Date(start);
+    day.setUTCDate(day.getUTCDate() + index);
+    const date = day.toISOString().slice(0, 10);
+    const change = changes.get(date);
+    bytes += change?.bytes ?? 0;
+    files += change?.files ?? 0;
+    return { date, bytes, files };
+  });
+}
+
+export async function deleteAllPages(): Promise<number> {
+  const { client, bucket } = getClient();
+  let deleted = 0;
+
+  while (true) {
+    const listed = await client.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: PREFIX, MaxKeys: 1000 }),
+    );
+    const objects = (listed.Contents ?? []).map((object) => ({ Key: object.Key! }));
+    if (objects.length === 0) return deleted;
+
+    const result = await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: objects, Quiet: true },
+      }),
+    );
+    if (result.Errors?.length) {
+      throw new Error(`R2 failed to delete ${result.Errors.length} object(s)`);
+    }
+    deleted += objects.length;
   }
 }
