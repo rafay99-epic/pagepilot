@@ -8,6 +8,7 @@ import {
   listPages,
   deletePage,
   getPageHtml,
+  getPageStream,
   getStorageStats,
   renamePage,
 } from "./r2";
@@ -67,6 +68,22 @@ test("one id can't collide with a longer one sharing its prefix", async () => {
     await deletePage(page.id);
   }
 }, 20_000);
+
+test("the stream body carries the same bytes the string path returns", async () => {
+  const html = "<h1>streamed</h1><p>caf\u00e9 \ud83d\ude80</p>";
+  const page = await deployPage(html, "streamed");
+  try {
+    const stream = await getPageStream(page.id);
+    expect(stream).not.toBeNull();
+    expect(await new Response(stream).text()).toBe(html);
+  } finally {
+    await deletePage(page.id);
+  }
+}, 20_000);
+
+test("a missing page streams as null", async () => {
+  expect(await getPageStream("ffffffffffff")).toBeNull();
+});
 
 test("missing page reads as null and deletes as false", async () => {
   expect(await getPageHtml("ffffffffffff")).toBeNull();

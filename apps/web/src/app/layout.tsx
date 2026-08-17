@@ -1,10 +1,4 @@
-import {
-  ClerkProvider,
-  Show,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from "@clerk/nextjs";
+import { ClerkProvider } from "@clerk/nextjs";
 import { shadcn } from "@clerk/ui/themes";
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
@@ -14,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { site } from "@/lib/site";
 import { GithubIcon, Logo, LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
+import { AuthNav } from "@/components/auth-nav";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
@@ -67,25 +62,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <Button variant="ghost" size="sm" asChild>
                   <Link href="/docs">Docs</Link>
                 </Button>
-                <Show when="signed-in">
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/dashboard">Dashboard</Link>
-                  </Button>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href="/storage">Storage</Link>
-                  </Button>
-                  <UserButton />
-                </Show>
-                <Show when="signed-out">
-                  <SignInButton mode="modal" forceRedirectUrl="/dashboard">
-                    <Button variant="ghost" size="sm">
-                      Sign in
-                    </Button>
-                  </SignInButton>
-                  <SignUpButton mode="modal" forceRedirectUrl="/dashboard">
-                    <Button size="sm">Sign up</Button>
-                  </SignUpButton>
-                </Show>
+                <AuthNav />
               </nav>
             </div>
           </header>

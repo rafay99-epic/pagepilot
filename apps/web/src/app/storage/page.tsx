@@ -78,7 +78,8 @@ export default async function StoragePage() {
         <CardContent>
           <p className="text-muted-foreground text-sm">
             Delete every HTML object under the PagePilot storage prefix. Published links
-            will stop working immediately. This cannot be undone.
+            stop working within a minute, once the edge cache expires. This cannot be
+            undone.
           </p>
           <div className="mt-5">
             <DeleteStorage disabled={storage.files === 0} />

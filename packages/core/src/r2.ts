@@ -1,12 +1,4 @@
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  ListObjectsV2Command,
-  CopyObjectCommand,
-  DeleteObjectsCommand,
-} from "@aws-sdk/client-s3";
+import { AwsClient } from "aws4fetch";
 
 export type PageRecord = {
   id: string;
@@ -17,14 +9,21 @@ export type PageRecord = {
 const PREFIX = "pages/";
 const MAX_HTML_BYTES = 900_000;
 
-let cachedClient: ReturnType<typeof createClient> | undefined;
+type R2 = { aws: AwsClient; base: string; bucket: string };
 
-export function getClient() {
+let cachedClient: R2 | undefined;
+
+export function getClient(): R2 {
   cachedClient ??= createClient();
   return cachedClient;
 }
 
-function createClient() {
+/**
+ * `aws4fetch` instead of `@aws-sdk/client-s3`: R2 speaks plain SigV4 over HTTP
+ * and the six calls below are one request each, so the SDK bought nothing but a
+ * multi-megabyte module init charged to every cold start as billable CPU.
+ */
+function createClient(): R2 {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
@@ -37,13 +36,29 @@ function createClient() {
   }
 
   return {
-    client: new S3Client({
-      region: "auto",
-      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-      credentials: { accessKeyId, secretAccessKey },
-    }),
+    aws: new AwsClient({ accessKeyId, secretAccessKey, region: "auto", service: "s3" }),
+    base: `https://${accountId}.r2.cloudflarestorage.com`,
     bucket,
   };
+}
+
+/** Every char our keys use is unreserved, but encode per segment anyway so the
+ * URL we sign and the URL we send can never disagree. */
+function objectUrl({ base, bucket }: R2, key: string): string {
+  return `${base}/${bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/**
+ * S3 answers a missing object with 404 and everything else with a body worth
+ * seeing, so collapse the first to null and shout about the rest.
+ */
+async function send(request: Promise<Response>, what: string): Promise<Response | null> {
+  const res = await request;
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`R2 ${what} failed: ${res.status} ${await res.text()}`);
+  }
+  return res;
 }
 
 /**
@@ -82,22 +97,68 @@ function titleOf(key: string): string {
     : encoded;
 }
 
-/** Recovers the full key from a bare id, since the key also carries the title. */
-async function resolveKey(
-  client: S3Client,
-  bucket: string,
-  id: string,
-): Promise<string | null> {
-  if (!/^[a-f0-9]{12}$/.test(id)) return null;
-  // Anchored on the `~` so `abc123~` can't be matched by a longer id.
-  const res = await client.send(
-    new ListObjectsV2Command({
-      Bucket: bucket,
-      Prefix: `${PREFIX}${id}~`,
-      MaxKeys: 1,
-    }),
+type Listing = {
+  objects: { key: string; size: number; modifiedAt: Date }[];
+  nextCursor?: string;
+};
+
+const XML_ENTITIES: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&apos;": "'",
+};
+
+function unescapeXml(value: string): string {
+  return value.replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) => XML_ENTITIES[entity]!);
+}
+
+function tagOf(xml: string, name: string): string | undefined {
+  const match = xml.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`));
+  return match ? unescapeXml(match[1]!) : undefined;
+}
+
+/**
+ * ListObjectsV2 is the only R2 call that answers in XML. The shape is fixed and
+ * shallow — a flat run of <Contents> plus a truncation flag — so it does not
+ * justify pulling a parser back in.
+ */
+function parseListing(xml: string): Listing {
+  const objects = Array.from(xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)).map(
+    (match) => {
+      const entry = match[1]!;
+      return {
+        key: tagOf(entry, "Key") ?? "",
+        size: Number(tagOf(entry, "Size") ?? 0),
+        modifiedAt: new Date(tagOf(entry, "LastModified") ?? 0),
+      };
+    },
   );
-  return res.Contents?.[0]?.Key ?? null;
+  const truncated = tagOf(xml, "IsTruncated") === "true";
+  return {
+    objects,
+    nextCursor: truncated ? tagOf(xml, "NextContinuationToken") : undefined,
+  };
+}
+
+async function listObjects(
+  client: R2,
+  {
+    prefix = PREFIX,
+    maxKeys,
+    cursor,
+  }: { prefix?: string; maxKeys?: number; cursor?: string },
+): Promise<Listing> {
+  const query = new URLSearchParams({ "list-type": "2", prefix });
+  if (maxKeys) query.set("max-keys", String(maxKeys));
+  if (cursor) query.set("continuation-token", cursor);
+
+  const res = await send(
+    client.aws.fetch(`${client.base}/${client.bucket}?${query}`),
+    "list",
+  );
+  return res ? parseListing(await res.text()) : { objects: [] };
 }
 
 function publicUrl(id: string): string {
@@ -112,6 +173,17 @@ function publicUrl(id: string): string {
   return base ? `${base}/p/${id}` : `/p/${id}`;
 }
 
+/** Recovers the full key from a bare id, since the key also carries the title. */
+async function resolveKey(client: R2, id: string): Promise<string | null> {
+  if (!/^[a-f0-9]{12}$/.test(id)) return null;
+  // Anchored on the `~` so `abc123~` can't be matched by a longer id.
+  const { objects } = await listObjects(client, {
+    prefix: `${PREFIX}${id}~`,
+    maxKeys: 1,
+  });
+  return objects[0]?.key ?? null;
+}
+
 export async function deployPage(
   html: string,
   title?: string,
@@ -119,18 +191,24 @@ export async function deployPage(
   if (Buffer.byteLength(html, "utf8") > MAX_HTML_BYTES) {
     throw new Error("HTML exceeds the 900 KB limit");
   }
-  const { client, bucket } = getClient();
+  const client = getClient();
   const id = makeId();
   const key = keyOf(id, title);
 
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: html,
-      ContentType: "text/html; charset=utf-8",
+  await send(
+    client.aws.fetch(objectUrl(client, key), {
+      method: "PUT",
+      body: html,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        // The transport is already TLS, so hashing up to 900 KB a second time
+        // just to sign it is CPU spent for nothing.
+        "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+      },
     }),
+    "put",
   );
+  invalidateStats();
 
   return {
     id,
@@ -147,107 +225,124 @@ export async function listPages(
   items: (PageRecord & { url: string })[];
   nextCursor?: string;
 }> {
-  const { client, bucket } = getClient();
-  const pageSize = Math.max(1, Math.min(limit, 100));
-  const res = await client.send(
-    new ListObjectsV2Command({
-      Bucket: bucket,
-      Prefix: PREFIX,
-      MaxKeys: pageSize,
-      ContinuationToken: cursor,
-    }),
-  );
-  const items = (res.Contents ?? [])
-    .filter((obj) => obj.Key?.endsWith(".html"))
-    .map((obj) => {
-      const key = obj.Key!;
-      return {
-        id: idOf(key),
-        title: titleOf(key),
-        createdAt: (obj.LastModified ?? new Date(0)).toISOString(),
-        url: publicUrl(idOf(key)),
-      };
-    });
+  const client = getClient();
+  const { objects, nextCursor } = await listObjects(client, {
+    maxKeys: Math.max(1, Math.min(limit, 100)),
+    cursor,
+  });
+  const items = objects
+    .filter((object) => object.key.endsWith(".html"))
+    .map((object) => ({
+      id: idOf(object.key),
+      title: titleOf(object.key),
+      createdAt: object.modifiedAt.toISOString(),
+      url: publicUrl(idOf(object.key)),
+    }));
 
-  return {
-    items,
-    nextCursor: res.IsTruncated ? res.NextContinuationToken : undefined,
-  };
+  return { items, nextCursor };
 }
 
 export async function deletePage(id: string): Promise<boolean> {
-  const { client, bucket } = getClient();
-  const key = await resolveKey(client, bucket, id);
+  const client = getClient();
+  const key = await resolveKey(client, id);
   if (!key) return false;
-  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  await send(client.aws.fetch(objectUrl(client, key), { method: "DELETE" }), "delete");
+  invalidateStats();
   return true;
 }
 
 export async function renamePage(id: string, title: string): Promise<boolean> {
-  const { client, bucket } = getClient();
-  const oldKey = await resolveKey(client, bucket, id);
+  const client = getClient();
+  const oldKey = await resolveKey(client, id);
   if (!oldKey) return false;
   const newKey = keyOf(id, title);
   if (oldKey === newKey) return true;
 
-  await client.send(
-    new CopyObjectCommand({
-      Bucket: bucket,
-      CopySource: encodeURIComponent(`${bucket}/${oldKey}`).replace(/%2F/g, "/"),
-      Key: newKey,
-      ContentType: "text/html; charset=utf-8",
-      MetadataDirective: "REPLACE",
+  await send(
+    client.aws.fetch(objectUrl(client, newKey), {
+      method: "PUT",
+      headers: {
+        "x-amz-copy-source": `/${client.bucket}/${oldKey
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`,
+        "x-amz-metadata-directive": "REPLACE",
+        "content-type": "text/html; charset=utf-8",
+        "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+      },
     }),
+    "copy",
   );
-  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: oldKey }));
+  await send(client.aws.fetch(objectUrl(client, oldKey), { method: "DELETE" }), "delete");
+  invalidateStats();
   return true;
 }
 
-export async function getPageHtml(id: string): Promise<string | null> {
-  const { client, bucket } = getClient();
-  const key = await resolveKey(client, bucket, id);
+async function fetchPage(id: string): Promise<Response | null> {
+  const client = getClient();
+  const key = await resolveKey(client, id);
   if (!key) return null;
-  try {
-    const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-    return (await res.Body?.transformToString()) ?? null;
-  } catch (e: unknown) {
-    if ((e as { name?: string }).name === "NoSuchKey") return null;
-    throw e;
-  }
+  return send(client.aws.fetch(objectUrl(client, key)), "get");
 }
 
-export async function getStorageStats(): Promise<{
+export async function getPageHtml(id: string): Promise<string | null> {
+  return (await fetchPage(id))?.text() ?? null;
+}
+
+/**
+ * The bytes go browser-bound untouched. Materialising a 900 KB page as a JS
+ * string only to re-encode it on the way out is a decode plus two copies of
+ * billable CPU per view; piping the body through is I/O the platform does not
+ * charge for.
+ */
+export async function getPageStream(id: string): Promise<ReadableStream | null> {
+  return (await fetchPage(id))?.body ?? null;
+}
+
+export type StorageStats = {
   bucket: string;
   files: number;
   bytes: number;
   history: { date: string; bytes: number; files: number }[];
-}> {
-  const { client, bucket } = getClient();
+};
+
+/**
+ * A full-bucket walk, so hold the answer for a minute. `/storage` is one
+ * person's admin screen and its numbers are a progress bar, not a ledger.
+ *
+ * ponytail: per-instance memo. A shared cache only matters once more than one
+ * function instance is serving this page often enough to notice.
+ */
+const STATS_TTL_MS = 60_000;
+let cachedStats: { at: number; value: StorageStats } | undefined;
+
+function invalidateStats(): void {
+  cachedStats = undefined;
+}
+
+export async function getStorageStats(): Promise<StorageStats> {
+  const now = Date.now();
+  if (cachedStats && now - cachedStats.at < STATS_TTL_MS) return cachedStats.value;
+
+  const client = getClient();
   let files = 0;
   let bytes = 0;
   const objects: { bytes: number; modifiedAt: Date }[] = [];
   let cursor: string | undefined;
 
   do {
-    const res = await client.send(
-      new ListObjectsV2Command({
-        Bucket: bucket,
-        Prefix: PREFIX,
-        ContinuationToken: cursor,
-      }),
-    );
-    for (const object of res.Contents ?? []) {
+    const listing = await listObjects(client, { cursor });
+    for (const object of listing.objects) {
       files += 1;
-      bytes += object.Size ?? 0;
-      objects.push({
-        bytes: object.Size ?? 0,
-        modifiedAt: object.LastModified ?? new Date(0),
-      });
+      bytes += object.size;
+      objects.push({ bytes: object.size, modifiedAt: object.modifiedAt });
     }
-    cursor = res.IsTruncated ? res.NextContinuationToken : undefined;
+    cursor = listing.nextCursor;
   } while (cursor);
 
-  return { bucket, files, bytes, history: storageHistory(objects) };
+  const value = { bucket: client.bucket, files, bytes, history: storageHistory(objects) };
+  cachedStats = { at: now, value };
+  return value;
 }
 
 function storageHistory(
@@ -287,26 +382,33 @@ function storageHistory(
   });
 }
 
+const DELETE_CONCURRENCY = 20;
+
 export async function deleteAllPages(): Promise<number> {
-  const { client, bucket } = getClient();
+  const client = getClient();
   let deleted = 0;
 
   while (true) {
-    const listed = await client.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: PREFIX, MaxKeys: 1000 }),
-    );
-    const objects = (listed.Contents ?? []).map((object) => ({ Key: object.Key! }));
-    if (objects.length === 0) return deleted;
-
-    const result = await client.send(
-      new DeleteObjectsCommand({
-        Bucket: bucket,
-        Delete: { Objects: objects, Quiet: true },
-      }),
-    );
-    if (result.Errors?.length) {
-      throw new Error(`R2 failed to delete ${result.Errors.length} object(s)`);
+    const { objects } = await listObjects(client, { maxKeys: 1000 });
+    if (objects.length === 0) {
+      invalidateStats();
+      return deleted;
     }
-    deleted += objects.length;
+
+    // One DELETE per object rather than a batch: the batch endpoint wants a
+    // hand-built XML body with a Content-MD5, and this path runs from a button
+    // nobody presses twice.
+    for (let i = 0; i < objects.length; i += DELETE_CONCURRENCY) {
+      const chunk = objects.slice(i, i + DELETE_CONCURRENCY);
+      await Promise.all(
+        chunk.map((object) =>
+          send(
+            client.aws.fetch(objectUrl(client, object.key), { method: "DELETE" }),
+            "delete",
+          ),
+        ),
+      );
+      deleted += chunk.length;
+    }
   }
 }
