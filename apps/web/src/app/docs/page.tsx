@@ -96,7 +96,7 @@ const faq = [
   },
   {
     q: "How do I revoke a page?",
-    a: "Ask your agent to call delete_page with the id. The object leaves R2 and the URL 404s immediately. There is no other revocation mechanism, by design.",
+    a: "Ask your agent to call delete_page with the id. The object leaves R2 at once; a copy can still be served from the edge cache for up to a minute after that, so treat revocation as taking a minute rather than an instant. There is no other revocation mechanism, by design.",
   },
   {
     q: "Can I use it with GPT or Gemini?",
@@ -220,7 +220,8 @@ export default function Docs() {
             server-side to build previews. Pages send <Code>X-Robots-Tag: noindex</Code>{" "}
             and <Code>robots.txt</Code> disallows <Code>/p/</Code>, so a leaked link still
             can&apos;t become a search result. When you want a page gone, call{" "}
-            <Code>delete_page</Code> — the URL dies immediately.
+            <Code>delete_page</Code> — the object leaves R2 at once and the URL stops
+            serving within a minute, once the edge cache expires.
           </p>
           <p>
             Your <Code>PAGEPILOT_API_KEY</Code> guards publishing, listing and deleting.

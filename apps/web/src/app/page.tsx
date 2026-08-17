@@ -230,8 +230,8 @@ export default function Home() {
               <code className="text-foreground">robots.txt</code> disallows{" "}
               <code className="text-foreground">/p/</code>, so a leaked link still
               can&apos;t become a search result. When you want a page gone,{" "}
-              <code className="text-foreground">delete_page</code> kills the URL
-              immediately.
+              <code className="text-foreground">delete_page</code> kills the URL within a
+              minute.
             </p>
             <Button variant="link" className="mt-4 px-0" asChild>
               <Link href="/docs#privacy">
