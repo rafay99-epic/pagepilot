@@ -23,3 +23,21 @@ export function isValidKey(key: string): boolean {
 export function isAuthed(req: Request): boolean {
   return isValidKey(presentedKey(req));
 }
+
+/**
+ * Shared so the middleware rejection and the route's own rejection are the same
+ * bytes. `/api/mcp` is a public URL and gets scanned like one; the middleware
+ * answers those in the edge runtime, which keeps a probe from costing a Node
+ * function invocation. The route keeps its own check for anything that reaches
+ * it with the middleware bypassed.
+ */
+export function unauthorized(): Response {
+  return Response.json(
+    {
+      jsonrpc: "2.0",
+      error: { code: -32001, message: "Unauthorized: send Authorization: Bearer <key>" },
+      id: null,
+    },
+    { status: 401, headers: { "www-authenticate": "Bearer" } },
+  );
+}

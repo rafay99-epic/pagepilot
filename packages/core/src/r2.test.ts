@@ -14,6 +14,22 @@ import {
 } from "./r2";
 import { isValidKey } from "./auth";
 
+/**
+ * `listPages` clamps to 100 keys per call, so a bucket past that size cannot be
+ * covered by one request. Asking for 200 quietly got 100, which made "is my new
+ * page listed?" a coin flip on where its random id sorted.
+ */
+async function findListed(id: string) {
+  let cursor: string | undefined;
+  do {
+    const page = await listPages(100, cursor);
+    const hit = page.items.find((item) => item.id === id);
+    if (hit) return hit;
+    cursor = page.nextCursor;
+  } while (cursor);
+  return undefined;
+}
+
 test("deploy -> read -> list -> delete", async () => {
   const title = 'Plan: "R2" & co / 50% ~ done — café 🚀';
   const html = "<h1>hi</h1>";
@@ -28,8 +44,7 @@ test("deploy -> read -> list -> delete", async () => {
 
   expect(await getPageHtml(page.id)).toBe(html);
 
-  const listed = (await listPages(200)).items.find((p) => p.id === page.id);
-  expect(listed?.title).toBe(title);
+  expect((await findListed(page.id))?.title).toBe(title);
 
   expect(await deletePage(page.id)).toBe(true);
   expect(await getPageHtml(page.id)).toBeNull();
@@ -50,8 +65,7 @@ test("renaming keeps the page content and updates its listing", async () => {
   try {
     expect(await renamePage(page.id, "After")).toBe(true);
     expect(await getPageHtml(page.id)).toBe("<h1>rename me</h1>");
-    const listed = (await listPages(200)).items.find((item) => item.id === page.id);
-    expect(listed?.title).toBe("After");
+    expect((await findListed(page.id))?.title).toBe("After");
   } finally {
     await deletePage(page.id);
   }
@@ -73,9 +87,38 @@ test("the stream body carries the same bytes the string path returns", async () 
   const html = "<h1>streamed</h1><p>caf\u00e9 \ud83d\ude80</p>";
   const page = await deployPage(html, "streamed");
   try {
-    const stream = await getPageStream(page.id);
-    expect(stream).not.toBeNull();
-    expect(await new Response(stream).text()).toBe(html);
+    const streamed = await getPageStream(page.id);
+    expect(streamed).not.toBeNull();
+    expect(await new Response(streamed!.body).text()).toBe(html);
+  } finally {
+    await deletePage(page.id);
+  }
+}, 20_000);
+
+// Without a validator nothing between R2 and the browser can answer a
+// conditional request, so every reload had to re-send the whole page. R2 sends
+// the strong form for a plain object and the weak one once it compresses on
+// egress, so the route has to cope with either.
+test("a streamed page carries R2's ETag", async () => {
+  const page = await deployPage("<h1>etag</h1>", "etag");
+  try {
+    const streamed = await getPageStream(page.id);
+    expect(streamed!.etag).toMatch(/^(W\/)?"[0-9a-f]+"$/);
+    await streamed!.body.cancel();
+  } finally {
+    await deletePage(page.id);
+  }
+}, 20_000);
+
+// The id-to-key memo skips the prefix list on a warm instance. A rename moves
+// the key, so a second read must not keep serving the stale one.
+test("a page stays readable across repeat reads and a rename", async () => {
+  const page = await deployPage("<h1>memo</h1>", "Before");
+  try {
+    expect(await getPageHtml(page.id)).toBe("<h1>memo</h1>");
+    expect(await getPageHtml(page.id)).toBe("<h1>memo</h1>");
+    expect(await renamePage(page.id, "After")).toBe(true);
+    expect(await getPageHtml(page.id)).toBe("<h1>memo</h1>");
   } finally {
     await deletePage(page.id);
   }
