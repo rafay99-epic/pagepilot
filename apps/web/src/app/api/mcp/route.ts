@@ -2,9 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { deployPage, listPages, deletePage } from "@pagepilot/core/r2";
-import { isAuthed } from "@pagepilot/core/auth";
+import { isAuthed, unauthorized } from "@pagepilot/core/auth";
 
-export const maxDuration = 60;
+/**
+ * The longest thing a tool does is PUT 900 KB to R2. A minute was headroom
+ * nothing here needs, and it let a request that stalls hold a function open for
+ * that whole minute.
+ */
+export const maxDuration = 15;
 
 const text = (s: string) => ({ content: [{ type: "text" as const, text: s }] });
 
@@ -34,7 +39,7 @@ const LIST_PAGES = {
 
 const DELETE_PAGE = {
   description:
-    "Permanently remove a page from the vault. The URL stops working within a minute.",
+    "Permanently remove a page from the vault. The URL stops working within two minutes.",
   inputSchema: {
     id: z.string().min(1).describe("The page ID, e.g. 'debe892c1fc3'"),
   },
@@ -65,19 +70,9 @@ function buildServer() {
 }
 
 async function handle(request: Request): Promise<Response> {
-  if (!isAuthed(request)) {
-    return Response.json(
-      {
-        jsonrpc: "2.0",
-        error: {
-          code: -32001,
-          message: "Unauthorized: send Authorization: Bearer <key>",
-        },
-        id: null,
-      },
-      { status: 401, headers: { "www-authenticate": "Bearer" } },
-    );
-  }
+  // The middleware already rejected this, so reaching it means the middleware
+  // was bypassed. Kept because the key is the only thing guarding the vault.
+  if (!isAuthed(request)) return unauthorized();
 
   // A fresh server and transport per request: this runs on serverless, so there
   // is no process to keep a session in. Stateless mode plus JSON responses means

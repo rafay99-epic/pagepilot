@@ -10,6 +10,8 @@
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
         "PAGEPILOT_API_KEY",
+        "CLERK_SECRET_KEY",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
         "PUBLIC_URL",
         "VERCEL_PROJECT_PRODUCTION_URL"
       ]

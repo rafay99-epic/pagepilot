@@ -173,6 +173,24 @@ function publicUrl(id: string): string {
   return base ? `${base}/p/${id}` : `/p/${id}`;
 }
 
+/**
+ * Reading a page costs a prefix list to recover its key and then the GET, and
+ * the id-to-key mapping does not change while the page sits there. Remembering
+ * it per instance turns the hot path into one R2 call on a warm function.
+ * Bounded because a busy instance would otherwise hold every id it ever served.
+ */
+const KEY_CACHE_MAX = 512;
+const keyCache = new Map<string, string>();
+
+function rememberKey(id: string, key: string): void {
+  keyCache.delete(id);
+  keyCache.set(id, key);
+  if (keyCache.size > KEY_CACHE_MAX) {
+    const oldest = keyCache.keys().next().value;
+    if (oldest !== undefined) keyCache.delete(oldest);
+  }
+}
+
 /** Recovers the full key from a bare id, since the key also carries the title. */
 async function resolveKey(client: R2, id: string): Promise<string | null> {
   if (!/^[a-f0-9]{12}$/.test(id)) return null;
@@ -247,6 +265,7 @@ export async function deletePage(id: string): Promise<boolean> {
   const key = await resolveKey(client, id);
   if (!key) return false;
   await send(client.aws.fetch(objectUrl(client, key), { method: "DELETE" }), "delete");
+  keyCache.delete(id);
   invalidateStats();
   return true;
 }
@@ -257,6 +276,7 @@ export async function renamePage(id: string, title: string): Promise<boolean> {
   if (!oldKey) return false;
   const newKey = keyOf(id, title);
   if (oldKey === newKey) return true;
+  keyCache.delete(id);
 
   await send(
     client.aws.fetch(objectUrl(client, newKey), {
@@ -274,29 +294,50 @@ export async function renamePage(id: string, title: string): Promise<boolean> {
     "copy",
   );
   await send(client.aws.fetch(objectUrl(client, oldKey), { method: "DELETE" }), "delete");
+  rememberKey(id, newKey);
   invalidateStats();
   return true;
 }
 
 async function fetchPage(id: string): Promise<Response | null> {
   const client = getClient();
+
+  // A stale entry is safe: the GET still has to find the object, and a 404 here
+  // only means the page was renamed or deleted, so fall back to the list.
+  const remembered = keyCache.get(id);
+  if (remembered) {
+    const hit = await send(client.aws.fetch(objectUrl(client, remembered)), "get");
+    if (hit) return hit;
+    keyCache.delete(id);
+  }
+
   const key = await resolveKey(client, id);
   if (!key) return null;
-  return send(client.aws.fetch(objectUrl(client, key)), "get");
+  const res = await send(client.aws.fetch(objectUrl(client, key)), "get");
+  if (res) rememberKey(id, key);
+  return res;
 }
 
 export async function getPageHtml(id: string): Promise<string | null> {
   return (await fetchPage(id))?.text() ?? null;
 }
 
+export type PageBody = { body: ReadableStream; etag?: string };
+
 /**
  * The bytes go browser-bound untouched. Materialising a 900 KB page as a JS
  * string only to re-encode it on the way out is a decode plus two copies of
  * billable CPU per view; piping the body through is I/O the platform does not
  * charge for.
+ *
+ * R2's ETag rides along because without a validator nothing between here and
+ * the browser can answer a conditional request, so every revalidation had to
+ * re-send the whole page.
  */
-export async function getPageStream(id: string): Promise<ReadableStream | null> {
-  return (await fetchPage(id))?.body ?? null;
+export async function getPageStream(id: string): Promise<PageBody | null> {
+  const res = await fetchPage(id);
+  if (!res?.body) return null;
+  return { body: res.body, etag: res.headers.get("etag") ?? undefined };
 }
 
 export type StorageStats = {
@@ -391,6 +432,7 @@ export async function deleteAllPages(): Promise<number> {
   while (true) {
     const { objects } = await listObjects(client, { maxKeys: 1000 });
     if (objects.length === 0) {
+      keyCache.clear();
       invalidateStats();
       return deleted;
     }
