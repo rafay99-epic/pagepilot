@@ -1,0 +1,16 @@
+packages/core/src/r2.test.ts
+  h_1e0ba4a9f2a4b4 14,155-184
+packages/core/src/r2.ts
+  h_1e0ba4a9f2a4b4 209-213,223,226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "49167c7952d9787a992fbf3ba6e39f5de0cecb07",
+  "prompts": {},
+  "humans": {
+    "h_1e0ba4a9f2a4b4": {
+      "author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
