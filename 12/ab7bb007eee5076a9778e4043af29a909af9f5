@@ -1,0 +1,28 @@
+wrangler.jsonc
+  s_e3bcceff98d0f8::t_97240e9726c11f 11-17,22,52
+  s_e3bcceff98d0f8::t_89ebf79194b782 29-35,40,44,49
+  s_e3bcceff98d0f8::t_4f47a24c01b658 8-10
+  s_e3bcceff98d0f8::t_f666532df496e4 18-21
+  s_e3bcceff98d0f8::t_ca786fece6e33f 23-28
+  s_e3bcceff98d0f8::t_60096a6c56368a 36-39
+  s_e3bcceff98d0f8::t_7609f3902bb382 41-43
+  s_e3bcceff98d0f8::t_3859c13f810905 45-48
+  s_e3bcceff98d0f8::t_c1825b93d9495f 50-51
+  s_e3bcceff98d0f8::t_e0e716fa430742 53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "12ab7bb007eee5076a9778e4043af29a909af9f5",
+  "prompts": {},
+  "sessions": {
+    "s_e3bcceff98d0f8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f53ad5f71ffeIlEG3nx11Kz4mx",
+        "model": "stealth/union-alpha"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
