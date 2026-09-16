@@ -19,8 +19,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { AnimatedShinyText } from "@/components/ui/animated-shiny-text";
-import { BorderBeam } from "@/components/ui/border-beam";
 import { DotPattern } from "@/components/ui/dot-pattern";
 import { CodeBlock } from "@/components/code-block";
 import { site } from "@/lib/site";
@@ -112,9 +110,9 @@ export default function Home() {
             className="border-border/70 bg-card/60 hover:bg-card inline-flex max-w-full items-center gap-2 rounded-full border px-4 py-1.5 text-sm transition"
           >
             <Sparkles className="text-brand-400 size-3.5 shrink-0" />
-            <AnimatedShinyText className="mx-0 min-w-0 max-w-none text-left">
+            <span className="mx-0 min-w-0 max-w-none text-left">
               Hosted MCP endpoint — connect an agent in one command
-            </AnimatedShinyText>
+            </span>
             <ArrowRight className="text-muted-foreground size-3.5" />
           </Link>
 
@@ -154,9 +152,8 @@ export default function Home() {
           <CodeBlock
             code={install}
             label="terminal"
-            className="bg-card/80 backdrop-blur"
+            className="bg-card/80 backdrop-blur ring-1 ring-brand-500/30"
           />
-          <BorderBeam size={140} duration={8} colorFrom="#818cf8" colorTo="#4f46e5" />
         </div>
 
         <p className="text-muted-foreground mt-8 text-center text-sm">
@@ -262,7 +259,7 @@ export default function Home() {
       </section>
 
       <section className="py-20">
-        <Card className="bg-card/60 relative overflow-hidden text-center">
+        <Card className="bg-card/60 relative overflow-hidden text-center ring-1 ring-brand-500/30">
           <div className="hero-glow pointer-events-none absolute inset-0 opacity-70" />
           <CardContent className="relative py-16">
             <WandSparkles className="text-brand-400 mx-auto size-8" />
@@ -279,7 +276,6 @@ export default function Home() {
               </Link>
             </Button>
           </CardContent>
-          <BorderBeam size={180} duration={10} colorFrom="#a5b4fc" colorTo="#4f46e5" />
         </Card>
       </section>
     </>
