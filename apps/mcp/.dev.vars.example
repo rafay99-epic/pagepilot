@@ -1,0 +1,9 @@
+# Copy to .dev.vars (gitignored) for `wrangler dev`. Secrets in production are
+# set with `wrangler secret put <NAME>`; R2_ACCOUNT_ID and R2_BUCKET are plain
+# vars and can also live in wrangler.jsonc.
+R2_ACCOUNT_ID=your-cloudflare-account-id
+R2_ACCESS_KEY_ID=your-r2-access-key
+R2_SECRET_ACCESS_KEY=your-r2-secret-key
+R2_BUCKET=pagepilot
+PUBLIC_URL=https://pagepilot.rafay99.com
+PAGEPILOT_API_KEY=generate-with-openssl-rand-hex-32
