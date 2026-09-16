@@ -11,6 +11,7 @@ import {
   getPageStream,
   getStorageStats,
   renamePage,
+  getClient,
 } from "./r2";
 import { isValidKey } from "./auth";
 
@@ -150,6 +151,36 @@ test("storage history ends at the current totals", async () => {
   expect(storage.history.at(-1)?.files).toBe(storage.files);
   expect(storage.history[0]!.date < storage.history.at(-1)!.date).toBe(true);
 });
+
+// Production intermittently failed the PUT with R2's 411 MissingContentLength:
+// a string body can be streamed without Content-Length, and R2 rejects that.
+// The deploy must always send bytes plus an explicit length header.
+test("deploy sends bytes with an explicit content-length", async () => {
+  const client = getClient();
+  const original = client.aws.fetch.bind(client.aws);
+  let captured: { url: string; init: RequestInit } | undefined;
+  client.aws.fetch = ((url: string | URL, init?: RequestInit) => {
+    captured = { url: String(url), init: init ?? {} };
+    return Promise.resolve(new Response(null, { status: 200 }));
+  }) as typeof client.aws.fetch;
+
+  try {
+    const html = "<h1>bytes</h1>";
+    const page = await deployPage(html, "bytes");
+    expect(captured).toBeDefined();
+    const body = captured!.init.body;
+    expect(body).toBeInstanceOf(Uint8Array);
+    expect(new TextDecoder().decode(body as Uint8Array)).toBe(html);
+    expect(captured!.init.headers).toMatchObject({
+      "content-length": String(new TextEncoder().encode(html).byteLength),
+    });
+  } finally {
+    client.aws.fetch = original as typeof client.aws.fetch;
+  }
+
+  // The stub never wrote anything, but clean up the id bookkeeping anyway.
+  await deletePage("ffffffffffff");
+}, 5_000);
 
 test("key check rejects empty, wrong and near-miss keys", () => {
   const real = process.env.PAGEPILOT_API_KEY!;

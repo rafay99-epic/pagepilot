@@ -206,7 +206,11 @@ export async function deployPage(
   html: string,
   title?: string,
 ): Promise<PageRecord & { url: string }> {
-  if (Buffer.byteLength(html, "utf8") > MAX_HTML_BYTES) {
+  // Bytes, not a string: runtimes that stream request bodies drop
+  // Content-Length and R2 answers a bodyless PUT with 411. An explicit
+  // length keeps the header present even when the body is piped.
+  const body = new TextEncoder().encode(html);
+  if (body.byteLength > MAX_HTML_BYTES) {
     throw new Error("HTML exceeds the 900 KB limit");
   }
   const client = getClient();
@@ -216,9 +220,10 @@ export async function deployPage(
   await send(
     client.aws.fetch(objectUrl(client, key), {
       method: "PUT",
-      body: html,
+      body,
       headers: {
         "content-type": "text/html; charset=utf-8",
+        "content-length": String(body.byteLength),
         // The transport is already TLS, so hashing up to 900 KB a second time
         // just to sign it is CPU spent for nothing.
         "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
