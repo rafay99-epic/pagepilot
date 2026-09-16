@@ -1,0 +1,24 @@
+apps/web/package.json
+  h_1e0ba4a9f2a4b4 27
+apps/web/src/app/api/mcp/route.ts
+  h_1e0ba4a9f2a4b4 1,12-15,21,24
+bun.lock
+  h_1e0ba4a9f2a4b4 14-26,60,62,148-165,194-245,266-267,306-307,330-332,336-337,368-369,372-377,524-525,644-645,804-805,882,982-983,996-997,1060-1061,1172,1316-1317,1384,1388-1389,1570,1624-1625,1664,1668-1671,1676,1694-1698,1704-1705,1728-1731,1734-1739,1744-1745,1894-1895,1900-1901,1910-1911,1922-1923,1932-1933,1940-1941,1954-1955,1960-1961,1964-1965,1970-1971,2000-2002,2086-2087,2100-2145
+packages/core/package.json
+  h_1e0ba4a9f2a4b4 8-9,16,18
+packages/core/src/mcp.test.ts
+  h_1e0ba4a9f2a4b4 1-96
+packages/core/src/mcp.ts
+  h_1e0ba4a9f2a4b4 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bd245c991c28afa999a215d4c93050c7a483c7a3",
+  "prompts": {},
+  "humans": {
+    "h_1e0ba4a9f2a4b4": {
+      "author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
