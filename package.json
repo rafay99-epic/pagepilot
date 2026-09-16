@@ -1,25 +1,36 @@
 {
   "name": "pagepilot",
+  "version": "3.0.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "type": "module",
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "typecheck": "turbo typecheck",
-    "test": "bun --env-file=.env.local test",
-    "lint": "turbo lint",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "clean": "turbo clean"
+    "dev": "wrangler dev --env ''",
+    "build": "wrangler deploy --env '' --dry-run --outdir dist",
+    "deploy": "wrangler deploy --env ''",
+    "deploy:production": "wrangler deploy --env production",
+    "secret": "wrangler secret put PAGEPILOT_API_KEY --env ''",
+    "secret:production": "wrangler secret put PAGEPILOT_API_KEY --env production",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "bun run build && node --test tests/worker.test.ts",
+    "lint": "oxlint src tests",
+    "format": "prettier --write src tests package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md",
+    "format:check": "prettier --check src tests package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260916.1",
+    "@types/node": "^24.0.0",
+    "miniflare": "5.20260916.0-alpha",
+    "oxlint": "^1.83.0",
     "prettier": "^3.4.0",
-    "prettier-plugin-tailwindcss": "^0.6.0",
-    "turbo": "^2.3.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "wrangler": "^4.133.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
   },
   "packageManager": "bun@1.2.0"
 }

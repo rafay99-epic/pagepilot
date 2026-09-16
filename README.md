@@ -1,57 +1,134 @@
 # PagePilot
 
-> A private HTML vault for AI agents. One hosted MCP endpoint, backed by your own
-> Cloudflare R2 bucket. No dashboard, nothing to clone, nothing to run locally.
+Backend-only HTML publishing for agents. One Cloudflare Worker, a private R2 bucket,
+and the official MCP SDK. No Next.js, React, Clerk, Vercel, database, or frontend.
 
-```
-AI Agent ──HTTP──> /api/mcp (MCP server, hosted) ──S3 SDK──> Cloudflare R2
-                        │
-                     /p/<id>  ← short link, readable by anyone holding it
-```
+Production endpoint stays `https://pagepilot.rafay99.com/api/mcp`.
 
-The MCP server _is_ the application. There is no dashboard, no login and no separate API —
-publishing, listing and deleting all happen through MCP tools, so there is one
-authenticated surface instead of three.
+## Local development
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/rafay99-epic/pagepilot&root-directory=apps/web&env=R2_ACCOUNT_ID,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY,R2_BUCKET,PAGEPILOT_API_KEY)
-
-## Setup
-
-### 1. Create an R2 bucket
-
-Cloudflare Dashboard → R2 → Create Bucket. Use a bucket dedicated to PagePilot and
-**leave public access disabled** — no public development URL, no public custom domain on
-the bucket. Otherwise every page is fetchable straight from R2 and the access rules below
-mean nothing.
-
-Then create an API token with _Object Read & Write_ on that bucket.
-
-### 2. Deploy to Vercel
-
-Import the repo with **Root Directory** set to `apps/web`, leaving the build command on
-the default `next build`. Then set:
-
-| Variable               | Description                                                       |
-| ---------------------- | ----------------------------------------------------------------- |
-| `R2_ACCOUNT_ID`        | Cloudflare R2 account ID (32-hex, on the R2 overview page)        |
-| `R2_ACCESS_KEY_ID`     | R2 API token access key                                           |
-| `R2_SECRET_ACCESS_KEY` | R2 API token secret                                               |
-| `R2_BUCKET`            | Bucket name                                                       |
-| `PAGEPILOT_API_KEY`    | The key you generate below. Guards every tool.                    |
-| `PUBLIC_URL`           | Optional — only for a custom domain. Defaults to your Vercel URL. |
-
-### 3. Generate your API key
-
-Nobody issues this — you choose it. It is the only credential your agents ever see, and
-your `R2_*` credentials never leave the server.
+Requires Node.js 24+ and Bun. Run commands from the repository root.
 
 ```bash
-openssl rand -hex 32
+bun install
 ```
 
-Use the same value for `PAGEPILOT_API_KEY` in Vercel and in the MCP config below.
+Create `.dev.vars` using `.dev.vars.example` and set `PAGEPILOT_API_KEY` to a strong
+random value. Generate a key locally with `openssl rand -hex 32`. Never commit it.
+Wrangler does not use the old `.env.local` for Worker bindings; R2 credentials and
+Clerk variables are no longer needed.
 
-### 4. Connect your agent
+```bash
+bun run dev
+```
+
+Local endpoint: `http://localhost:8787/api/mcp`. Wrangler uses local emulated R2,
+not the live bucket. A missing or empty key makes MCP return 503 rather than allow access.
+
+```bash
+bun run test
+bun run typecheck
+bun run lint
+bun run format:check
+bun run build
+```
+
+Tests bundle the Worker and run it in Miniflare with temporary local R2 storage.
+They exercise the official MCP client, authentication, uploads, legacy links,
+pagination, HTML security headers, limits, and deletion. No account login or live
+bucket access is required. `build` is a deployment dry run, not a deployment.
+
+## Deploy a preview first
+
+The default configuration is deliberately separate from production:
+
+| Setting     | Preview                             | Production                                       |
+| ----------- | ----------------------------------- | ------------------------------------------------ |
+| Worker name | `pagepilot-preview`                 | `pagepilot`                                      |
+| R2 bucket   | `pagepilot-preview`                 | `pagepilot`, verify against your existing bucket |
+| Host        | workers.dev URL printed by Wrangler | `pagepilot.rafay99.com`                          |
+| Command     | `bun run deploy`                    | `bun run deploy:production`                      |
+
+Log in to the Cloudflare account that owns your R2 bucket and domain:
+
+```bash
+bunx wrangler login
+bunx wrangler r2 bucket create pagepilot-preview
+bun run secret
+bun run deploy
+```
+
+Skip bucket creation if it already exists. `secret` prompts for
+`PAGEPILOT_API_KEY`; if Wrangler offers to create the preview Worker before storing
+its first secret, accept. Use a separate preview key. Keep R2 public access disabled,
+including its r2.dev URL and public bucket custom domains.
+
+Use the workers.dev URL printed by Wrangler, with `/api/mcp` appended, in a temporary
+agent configuration. Preview-generated page URLs use that same preview host.
+
+Verify before cutover:
+
+- `GET /health` returns `ok`. This checks the Worker, not storage connectivity.
+- `/api/mcp` without a key or with a wrong key returns 401.
+- Your agent connects using the preview key and discovers all three tools.
+- Publish an HTML page, open its returned URL, list it, and delete it.
+- Opening the deleted URL returns 404.
+
+This preview uses a different bucket. It neither changes existing pages nor moves DNS.
+Do not enable Vercel preview builds for this branch: `apps/web` no longer exists here.
+
+## Production cutover, only after preview passes
+
+**The production deploy connects the live hostname to Cloudflare. Do not run it
+until you are ready to move traffic. Keep Vercel running until verification passes.**
+
+1. Confirm `rafay99.com` is an active zone in the same Cloudflare account.
+2. In `wrangler.jsonc`, set `env.production.r2_buckets[0].bucket_name` to the
+   existing PagePilot bucket. The default is `pagepilot`; no bucket content is
+   migrated or deleted by deployment. Keep the bucket private.
+3. Store the production secret:
+
+   ```bash
+   bun run secret:production
+   ```
+
+   Use your existing PagePilot API key to keep current agent configurations working.
+   If Wrangler offers to create the production Worker for its first secret, accept;
+   this command does not attach the custom domain. Secrets are separate per Worker.
+
+4. Record the existing Vercel DNS record and its proxy setting for rollback.
+   Cloudflare cannot attach a Worker Custom Domain over an existing CNAME record.
+   At cutover, remove the conflicting `pagepilot` CNAME and immediately deploy:
+
+   ```bash
+   bun run deploy:production
+   ```
+
+   Cloudflare creates the custom-domain DNS record and certificate. Allow for
+   provisioning time. Do not change unrelated DNS records. Resolve any conflicting
+   hostname record before retrying; do not delete the Vercel project.
+
+5. Verify `https://pagepilot.rafay99.com/health`, unauthenticated 401 responses,
+   an existing page link, and publish/list/delete through the production MCP endpoint.
+   Delete only a disposable page you created for the test.
+6. After verification, disable Vercel deployment automation and take down the old
+   Vercel deployment when you are satisfied. Remove its stale R2 credentials only
+   after confirming nothing else needs them.
+
+If cutover fails, remove the Worker's custom-domain association and restore the
+recorded Vercel DNS record. Existing legacy pages still work on Vercel. **Pages
+created by this new Worker use a different key format and are not readable by the
+old Vercel application.** Keep those R2 objects; restore the Worker to serve them.
+Do not run both versions as active writers during the cutover.
+
+## Agent connection
+
+Configure a Streamable HTTP MCP server with:
+
+- URL: `https://pagepilot.rafay99.com/api/mcp`
+- Header: `Authorization: Bearer YOUR_API_KEY`
+
+For Claude Code:
 
 ```bash
 claude mcp add --transport http pagepilot \
@@ -59,60 +136,61 @@ claude mcp add --transport http pagepilot \
   --header "Authorization: Bearer YOUR_API_KEY"
 ```
 
-Anything that reads an `mcp.json` — Cursor, OpenCode, Command Code, Claude Desktop —
-takes the same thing:
+Replace the placeholder locally. Client-specific configuration formats vary; the
+endpoint and authorization header stay the same. Never put the key in a URL.
 
-```json
-{
-  "mcpServers": {
-    "pagepilot": {
-      "type": "http",
-      "url": "https://pagepilot.rafay99.com/api/mcp",
-      "headers": { "Authorization": "Bearer YOUR_API_KEY" }
-    }
-  }
-}
-```
+## API and tools
 
-## Tools
+| Route                       | Behavior                                             |
+| --------------------------- | ---------------------------------------------------- |
+| `POST /api/mcp`             | API-key-protected, stateless MCP with JSON responses |
+| `GET` or `HEAD /p/:id`      | Published HTML, readable by anyone holding the link  |
+| `GET` or `HEAD /health`     | Plain-text liveness check                            |
+| `GET` or `HEAD /robots.txt` | Disallow indexing                                    |
+| Anything else               | 404, no dashboard or landing page                    |
 
-- `deploy_page(html, title?)` — Publish HTML, get back a short URL
-- `list_pages()` — The vault, newest first
-- `delete_page(id)` — Delete a page. The URL dies immediately.
+Authenticated non-POST MCP requests return 405. There are no persistent sessions or
+SSE subscriptions. Cross-origin browser requests are rejected; non-browser agents
+may omit Origin. Send `Content-Type: application/json` and
+`Accept: application/json, text/event-stream` for raw MCP requests.
 
-## Access model
+- `deploy_page({html, title?})`: up to 900,000 UTF-8 bytes of nonempty HTML. Optional
+  title is at most 120 UTF-16 code units and is trimmed. Returns text containing the
+  title and link.
+- `list_pages({cursor?})`: arguments may be omitted. Returns a JSON string in MCP
+  text content containing `items: [{id, title, url, createdAt}]` and optional
+  `nextCursor`. Pass it as `cursor` to continue. Up to 100 entries per call, ordered
+  by object key, not creation date. An empty vault returns `items: []`.
+- `delete_page({id})`: deletes an existing object or reports a missing page.
 
-`PAGEPILOT_API_KEY` guards the MCP endpoint — publishing, listing and deleting. Agents
-send it as `Authorization: Bearer`. Without it nobody can enumerate your vault or write to
-it.
+Missing/wrong credentials return 401; missing server key returns 503; disallowed
+Origin returns 403; invalid JSON returns 400; wrong content type returns 415;
+requests larger than 5,416,384 bytes return 413. The request cap allows JSON escaping
+of a valid 900 KB page. Tool validation/storage failures return MCP errors rather
+than revealing storage diagnostics or credentials.
 
-**Reading a page is unauthenticated.** There is no login and no cookie: the 12-character,
-48-bit id in `/p/<id>` _is_ the credential, so a page is exactly as private as its link.
-Nobody finds pages by guessing or crawling, and every page sends
-`X-Robots-Tag: noindex, nofollow, noarchive` with `robots.txt` disallowing `/p/`, so a
-leaked link can't become a search result.
+## Storage and security
 
-Be clear-eyed about what that is, though: whoever you send a link to can forward it, and
-Slack, Discord and Notion all fetch a URL server-side to build previews. If a page should
-stop being readable, `delete_page` it.
+New objects use `pages/<32-hex UUID>.html`, with title in R2 custom metadata.
+Reading a new page takes one native R2 GET and streams the body without decoding
+HTML. Listing includes custom metadata, without per-page HEAD calls. No S3 signing
+or XML parsing is needed.
 
-## Storage layout
+Existing `pages/<12-hex-id>~<base64url-title>.html` objects remain readable, listable,
+and deletable. Legacy reads use a fallback prefix lookup. Old URLs stay unchanged.
+There is no bulk migration.
 
-One object per page: `pages/<id>~<base64url title>.html`, where `<id>` is 12 hex
-characters.
+The API key protects publishing, listing, and deletion. **Page reads remain public
+to anyone with the link.** New IDs contain 122 random UUID bits; old IDs keep their
+48-bit entropy. Forwarded links, previews, and downloaded copies can expose content.
+Robots directives are advisory, not authentication.
 
-The id alone goes in the URL, so links stay short. The title still lives in the key, which
-keeps listing to a single `ListObjectsV2` — no index file for concurrent agents to clobber
-and no per-item `HeadObject`. Reading one page costs a prefix list to recover the key,
-anchored on the `~` so a short id can't match a longer one.
+HTML responses preserve the sandbox CSP without `allow-same-origin`, prohibit
+forms and embedding, and use `no-referrer` and `nosniff`. Scripts and HTTPS assets
+are allowed within the sandbox, so uploaded HTML can still make outbound requests.
+Do not upload secrets.
 
-## Local development
-
-```bash
-bun install
-bun run dev     # :3000
-bun run test    # round-trips real pages through your bucket
-```
-
-Copy `.env.example` to `.env.local` and fill it in. Point an agent at
-`http://localhost:3000/api/mcp` to exercise the tools against your own instance.
+Page responses use `private, no-store`. No CDN or browser cache is configured;
+new requests after deletion reach storage. Already opened pages or saved copies
+cannot be revoked. Old Vercel-cached responses may remain during cutover. This
+keeps deletion predictable; repeated views still cost a Worker invocation and R2 GET.

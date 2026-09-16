@@ -5,6 +5,7 @@ node_modules/
 .turbo/
 .next/
 dist/
+dist-production/
 .next.d/
 *.tsbuildinfo
 
@@ -18,3 +19,8 @@ dist/
 
 # Debug
 npm-debug.log*
+.wrangler/
+.dev.vars*
+!.dev.vars.example
+.env.*
+.firecrawl/
