@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "pagepilot-preview",
+	"name": "pagepilot",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-09-16",
 	"compatibility_flags": [
@@ -11,14 +11,20 @@
 	"observability": {
 		"logs": {
 			"enabled": true,
+			"head_sampling_rate": 1,
 			"invocation_logs": true,
+			"persist": true
+		},
+		"traces": {
+			"enabled": false,
+			"head_sampling_rate": 1,
 			"persist": true
 		}
 	},
 	"r2_buckets": [
 		{
 			"binding": "PAGES",
-			"bucket_name": "pagepilot-preview"
+			"bucket_name": "html-slop"
 		}
 	],
 	"env": {
@@ -29,7 +35,13 @@
 			"observability": {
 				"logs": {
 					"enabled": true,
+					"head_sampling_rate": 1,
 					"invocation_logs": true,
+					"persist": true
+				},
+				"traces": {
+					"enabled": false,
+					"head_sampling_rate": 1,
 					"persist": true
 				}
 			},
@@ -45,7 +57,7 @@
 			"r2_buckets": [
 				{
 					"binding": "PAGES",
-					"bucket_name": "pagepilot"
+					"bucket_name": "html-slop"
 				}
 			],
 		},
