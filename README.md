@@ -1,8 +1,8 @@
 # PagePilot
 
-Publish HTML from an AI agent and get a shareable link. PagePilot is a backend-only
-Cloudflare Worker using TypeScript, the official MCP SDK, Zod, and native R2 bindings.
-No Next.js, React, Clerk, dashboard, database, or Vercel runtime is required.
+Publish HTML from an AI agent and find it again in a private dashboard. PagePilot uses
+one Cloudflare Worker, native R2 bindings, the official MCP SDK, and a Vite + React +
+TanStack Query dashboard. No Next.js, Clerk, database, or Vercel runtime is required.
 
 - MCP endpoint: `https://pagepilot.rafay99.com/api/mcp`
 - Published pages: `https://pagepilot.rafay99.com/p/<id>`
@@ -17,6 +17,49 @@ R2, and the original bucket is reused rather than migrated.
 Existing 12-character page links remain supported. New pages use 32-character UUID
 IDs with titles stored in R2 metadata. Publishing, listing, and deleting still use
 the same three MCP tools and Bearer API-key authentication.
+
+## Private dashboard and deletion keys
+
+`/dashboard/` is a two-pane view: a searchable list of plans on the left and a live
+preview of the selected plan on the right, with copy-link, open and confirmed
+deletion. The preview loads through the owner-only route
+`/api/dashboard/pages/<id>/preview`; public `/p/` links still refuse framing. The dashboard never receives the MCP API key. Its API lives
+under `/api/dashboard/`; both API and static assets require a verified Cloudflare
+Access JWT with the configured audience, issuer, expiration, and owner email.
+
+Before enabling the dashboard:
+
+1. In Cloudflare Zero Trust, create one self-hosted Access application covering both
+   `pagepilot.rafay99.com/dashboard` and its subpaths, and
+   `pagepilot.rafay99.com/api/dashboard` and its subpaths. Use the same application
+   audience for both. Do not protect `/api/mcp` or `/p/` with this application.
+2. Add an Allow policy for your owner email only. Enable an identity provider or
+   email one-time PIN. Do not add a public Bypass policy.
+3. Store three values as Worker secrets so they stay out of git and survive deploys:
+   `ACCESS_TEAM_DOMAIN` (team hostname ending in `cloudflareaccess.com`),
+   `ACCESS_AUD` (the application's AUD tag, under Additional settings) and
+   `OWNER_EMAIL` (the address the policy allows). Run
+   `bunx wrangler secret put <NAME> --name <worker>` for each. For local runs, copy
+   `.dev.vars.example` to `.dev.vars`.
+4. Build the dashboard before direct Wrangler deployment: `bun run build:dashboard`.
+   The package deploy scripts build it automatically. Open `/dashboard/` and sign in.
+
+Missing Access configuration returns 503; missing or invalid JWT returns 403. There
+is deliberately no local authentication bypass. `bun run dev:dashboard` starts Vite
+for UI work, but its proxied API still requires a valid Access session. Integration
+tests use locally signed test JWTs and mocked JWKS, never production credentials.
+
+New uploads return a separate random `deletionKey` once, after the page URL. Agents
+must keep it outside published HTML and pass `{id, deletionKey}` to `delete_page`
+alongside their normal Bearer API key. R2 stores only the SHA-256 hash. Listing and
+page reads never reveal the key or hash. Missing/wrong keys cannot delete new pages.
+Pages created before this change, or pages whose deletion key was lost, can be deleted
+by the authenticated owner dashboard. Old read links remain unchanged.
+
+Source layout: `src/` contains Worker code, `dashboard/src/` contains React UI,
+`tests/` contains local Worker integration tests. Old monorepo build-cache folders
+were removed. Built dashboard assets live in ignored `dashboard/dist/`; every asset
+request runs through the Worker first, so static delivery cannot bypass authentication.
 
 ## Run locally
 
@@ -149,7 +192,8 @@ key rotation, update each client's header and restart clients that cache MCP set
 - `list_pages({cursor?})`: arguments may be omitted. Returns JSON in MCP text content
   with `items: [{id, title, url, createdAt}]` and optional `nextCursor`. Up to 100
   entries per call in object-key order, not newest-first.
-- `delete_page({id})`: permanently deletes the page or reports that it is missing.
+- `delete_page({id, deletionKey})`: validates the per-page key, then permanently deletes
+  the page or reports that it is missing. Legacy pages require owner-dashboard deletion.
 
 Missing or incorrect keys return 401; an unconfigured server key returns 503.
 Authenticated non-POST MCP requests return 405. Cross-origin browser requests are

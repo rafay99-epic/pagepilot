@@ -4,6 +4,8 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { z } from "zod";
+import { SignJWT } from "jose";
+import { generateKeyPairSync } from "node:crypto";
 
 const key = "local-test-key-not-a-production-secret";
 const base = "https://pagepilot.test";
@@ -17,6 +19,9 @@ const mf = new Miniflare(
     bindings: { PAGEPILOT_API_KEY: key },
   }),
 );
+
+const deletionKey = (result: { text: string }) =>
+  /Deletion key \(store it; shown once\): (\S+)/.exec(result.text)?.[1];
 
 before(async () => {
   await mf.ready;
@@ -80,13 +85,15 @@ async function publish(html = "<!doctype html><h1>Hello</h1>", title = "Test") {
   assert.ok(id);
   assert.match(id, /^[a-f0-9]{32}$/);
   assert.equal(new URL(url).origin, base);
-  return { id, url };
+  const dk = deletionKey(result);
+  assert.ok(dk);
+  return { id, url, deletionKey: dk };
 }
 
 test("backend starts; API key protects all MCP methods and origins", async () => {
   assert.equal(await (await mf.dispatchFetch(`${base}/health`)).text(), "ok");
   assert.equal((await mf.dispatchFetch(`${base}/`)).status, 404);
-  assert.equal((await mf.dispatchFetch(`${base}/dashboard`)).status, 404);
+  assert.equal((await mf.dispatchFetch(`${base}/dashboard`)).status, 503);
   for (const method of ["POST", "GET", "DELETE", "OPTIONS"]) {
     const response = await mf.dispatchFetch(`${base}/api/mcp`, { method });
     assert.equal(response.status, 401);
@@ -169,7 +176,7 @@ test("official MCP client initializes, discovers and invokes tools", async () =>
 
 test("publish, list without arguments, stream, conditional GET, HEAD and delete", async () => {
   const html = "<!doctype html><h1>Unicode café</h1>";
-  const { id, url } = await publish(html, "Unicode café");
+  const { id, url, deletionKey } = await publish(html, "Unicode café");
   const bucket = await mf.getR2Bucket("PAGES");
   assert.ok(await bucket.head(`pages/${id}.html`));
   const listing = listingSchema.parse(JSON.parse((await callTool("list_pages")).text));
@@ -202,9 +209,14 @@ test("publish, list without arguments, stream, conditional GET, HEAD and delete"
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
   assert.equal((await mf.dispatchFetch(url, { method: "POST" })).status, 405);
-  assert.ok(!(await callTool("delete_page", { id })).isError);
+  assert.ok((await callTool("delete_page", { id })).isError);
+  assert.ok((await callTool("delete_page", { id, deletionKey: "wrong-key" })).isError);
+  assert.ok(!(await callTool("delete_page", { id, deletionKey })).isError);
   assert.equal((await mf.dispatchFetch(url)).status, 404);
   assert.equal(await bucket.head(`pages/${id}.html`), null);
+  const replay = await callTool("delete_page", { id, deletionKey });
+  assert.ok(!replay.isError);
+  assert.match(replay.text, /No page with id/);
 });
 
 test("legacy title-in-key pages retain links, listing and deletion", async () => {
@@ -219,7 +231,11 @@ test("legacy title-in-key pages retain links, listing and deletion", async () =>
   );
   const listing = listingSchema.parse(JSON.parse((await callTool("list_pages")).text));
   assert.equal(listing.items.find((page) => page.id === id)?.title, title);
-  assert.ok(!(await callTool("delete_page", { id })).isError);
+  const legacyResult = await callTool("delete_page", { id, deletionKey: "irrelevant" });
+  assert.ok(legacyResult.isError);
+  assert.match(legacyResult.text, /owner dashboard/);
+  assert.ok(await bucket.head(oldKey), "legacy page must survive MCP delete");
+  await bucket.delete(oldKey);
   assert.equal(await bucket.head(oldKey), null);
   assert.equal((await mf.dispatchFetch(`${base}/p/${id}`)).status, 404);
 });
@@ -258,8 +274,8 @@ test("upload validation checks UTF-8 bytes and malformed input", async () => {
   assert.ok((await callTool("deploy_page", { html: "x".repeat(900_001) })).isError);
   assert.ok((await callTool("deploy_page", { html: "é".repeat(450_001) })).isError);
   assert.ok((await callTool("delete_page", { id: "not-an-id" })).isError);
-  const { id } = await publish("é".repeat(450_000));
-  await callTool("delete_page", { id });
+  const { id, deletionKey } = await publish("é".repeat(450_000));
+  await callTool("delete_page", { id, deletionKey });
   const response = await mf.dispatchFetch(`${base}/api/mcp`, {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
@@ -309,4 +325,249 @@ test("production canonical URL overrides preview request origin", async () => {
   } finally {
     await production.dispose();
   }
+});
+
+const accessDomain = "test-team.cloudflareaccess.com";
+const accessAud = "access-aud-test";
+const ownerEmail = "owner@example.com";
+
+const { publicKey: accessKey, privateKey: accessPrivateKey } = generateKeyPairSync(
+  "rsa",
+  {
+    modulusLength: 2048,
+  },
+);
+const accessJwk = {
+  ...accessKey.export({ format: "jwk" }),
+  kid: "test-kid",
+  alg: "RS256",
+  use: "sig",
+};
+
+function signAccessJwt(
+  claims: { email?: string } = {},
+  options: { iss?: string; aud?: string; exp?: string | number } = {},
+) {
+  return new SignJWT({ email: claims.email ?? ownerEmail })
+    .setProtectedHeader({ alg: "RS256", kid: "test-kid" })
+    .setIssuer(options.iss ?? `https://${accessDomain}`)
+    .setAudience(options.aud ?? accessAud)
+    .setIssuedAt()
+    .setExpirationTime(options.exp ?? "5m")
+    .sign(accessPrivateKey);
+}
+
+const accessMf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    scriptPath: "dist/index.js",
+    compatibilityDate: "2026-09-16",
+    compatibilityFlags: ["nodejs_compat"],
+    r2Buckets: ["PAGES"],
+    bindings: {
+      PAGEPILOT_API_KEY: key,
+      ACCESS_TEAM_DOMAIN: accessDomain,
+      ACCESS_AUD: accessAud,
+      OWNER_EMAIL: ownerEmail,
+    },
+    serviceBindings: {
+      ASSETS: async (request) => {
+        const url = new URL(request.url);
+        if (url.pathname === "/dashboard/") {
+          return new Response("<!doctype html><title>PagePilot</title>", {
+            headers: { "content-type": "text/html" },
+          });
+        }
+        return new Response("asset not found", { status: 404 });
+      },
+    },
+    outboundService: (request: Request) => {
+      if (request.url === `https://${accessDomain}/cdn-cgi/access/certs`) {
+        return Response.json({ keys: [accessJwk] });
+      }
+      return new Response("mock: not found", { status: 404 });
+    },
+  }),
+);
+
+test.after(async () => {
+  await accessMf.dispose();
+});
+
+async function dashboard(
+  path: string,
+  init: { method?: string; headers?: Record<string, string>; token?: string | null } = {},
+) {
+  const { token, headers, ...rest } = init;
+  const merged: Record<string, string> = { ...headers };
+  if (token !== null)
+    merged["cf-access-jwt-assertion"] = token ?? (await signAccessJwt());
+  return accessMf.dispatchFetch(`${base}${path}`, { ...rest, headers: merged });
+}
+
+test("dashboard fails closed without Access configuration", async () => {
+  for (const path of ["/dashboard", "/dashboard/app.js", "/api/dashboard/pages"]) {
+    const response = await mf.dispatchFetch(`${base}${path}`);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+  }
+});
+
+test("dashboard rejects missing, tampered, expired and mismatched tokens", async () => {
+  for (const token of [
+    null,
+    "not-a-jwt",
+    await signAccessJwt({ email: "intruder@evil.test" }),
+    await signAccessJwt({}, { exp: -10 }),
+    await signAccessJwt({}, { iss: "https://evil.cloudflareaccess.com" }),
+    await signAccessJwt({}, { aud: "wrong-aud" }),
+  ]) {
+    const response = await dashboard("/api/dashboard/pages", { token });
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.ok(await response.json());
+  }
+  const wrongKey = await new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      scriptPath: "dist/index.js",
+      compatibilityDate: "2026-09-16",
+      compatibilityFlags: ["nodejs_compat"],
+      r2Buckets: ["PAGES"],
+      bindings: {
+        PAGEPILOT_API_KEY: key,
+        ACCESS_TEAM_DOMAIN: "other-team.cloudflareaccess.com",
+        ACCESS_AUD: accessAud,
+        OWNER_EMAIL: ownerEmail,
+      },
+    }),
+  );
+  try {
+    const response = await wrongKey.dispatchFetch(`${base}/api/dashboard/pages`, {
+      headers: { "Cf-Access-Jwt-Assertion": await signAccessJwt() },
+    });
+    assert.equal(response.status, 403);
+  } finally {
+    await wrongKey.dispose();
+  }
+});
+
+test("dashboard assets require owner authentication", async () => {
+  const denied = await dashboard("/dashboard/", { token: null });
+  assert.equal(denied.status, 403);
+  const allowed = await dashboard("/dashboard/");
+  assert.equal(allowed.status, 200);
+  assert.match(await allowed.text(), /PagePilot/);
+  assert.equal(allowed.headers.get("cache-control"), "no-store");
+  assert.match(
+    allowed.headers.get("content-security-policy") ?? "",
+    /frame-ancestors 'none'/,
+  );
+});
+
+test("dashboard owner lists and deletes with origin and legacy handling", async () => {
+  const bucket = await accessMf.getR2Bucket("PAGES");
+  const deploy = await accessMf.dispatchFetch(`${base}/api/mcp`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "deploy_page", arguments: { html: "<p>dash</p>", title: "Dash" } },
+    }),
+  });
+  const deployResult = resultSchema.parse(await deploy.json()).result;
+  assert.ok(!deployResult.isError);
+  const id = deployResult.content[0]!.text.split("\n")[1]!.split("/").at(-1)!;
+  await bucket.put(
+    `pages/012345abcdef~${Buffer.from("Old").toString("base64url")}.html`,
+    "<p>old</p>",
+  );
+
+  const listing = listingSchema.parse(
+    await (await dashboard("/api/dashboard/pages")).json(),
+  );
+  assert.ok(listing.items.find((page) => page.id === id));
+  assert.ok(!("deletionKeyHash" in (listing.items[0] ?? {})));
+
+  const second = await dashboard("/api/dashboard/pages", {
+    headers: { origin: "https://untrusted.test" },
+  });
+  assert.equal(second.status, 200);
+
+  const deleteWithOrigin = await dashboard(`/api/dashboard/pages/${id}`, {
+    method: "DELETE",
+    headers: { origin: base },
+  });
+  assert.equal(deleteWithOrigin.status, 200);
+  assert.equal(await bucket.head(`pages/${id}.html`), null);
+
+  const crossOrigin = await dashboard(`/api/dashboard/pages/012345abcdef`, {
+    method: "DELETE",
+    headers: { origin: "https://untrusted.test" },
+  });
+  assert.equal(crossOrigin.status, 403);
+  assert.ok(
+    await bucket.head(
+      `pages/012345abcdef~${Buffer.from("Old").toString("base64url")}.html`,
+    ),
+  );
+
+  const deleteMissingOrigin = await dashboard(`/api/dashboard/pages/012345abcdef`, {
+    method: "DELETE",
+  });
+  assert.equal(deleteMissingOrigin.status, 403);
+
+  const deleteNotFound = await dashboard(
+    "/api/dashboard/pages/ffffffffffffffffffffffffffffffff",
+    {
+      method: "DELETE",
+      headers: { origin: base },
+    },
+  );
+  assert.equal(deleteNotFound.status, 404);
+  assert.ok(
+    await bucket.head(
+      `pages/012345abcdef~${Buffer.from("Old").toString("base64url")}.html`,
+    ),
+  );
+  const deleteLegacy = await dashboard("/api/dashboard/pages/012345abcdef", {
+    method: "DELETE",
+    headers: { origin: base },
+  });
+  assert.equal(deleteLegacy.status, 200);
+  assert.equal(
+    await bucket.head(
+      `pages/012345abcdef~${Buffer.from("Old").toString("base64url")}.html`,
+    ),
+    null,
+  );
+});
+
+test("dashboard preview is owner-only and framable only by the dashboard", async () => {
+  const bucket = await accessMf.getR2Bucket("PAGES");
+  await bucket.put("pages/abcdef012345.html", "<p>preview</p>");
+  const path = "/api/dashboard/pages/abcdef012345/preview";
+
+  const anonymous = await dashboard(path, { token: null });
+  assert.equal(anonymous.status, 403);
+
+  const preview = await dashboard(path);
+  assert.equal(preview.status, 200);
+  assert.equal(await preview.text(), "<p>preview</p>");
+  const csp = preview.headers.get("content-security-policy") ?? "";
+  assert.match(csp, /^sandbox allow-scripts allow-popups;/);
+  assert.match(csp, /frame-ancestors 'self'$/);
+
+  const shared = await accessMf.dispatchFetch(`${base}/p/abcdef012345`);
+  await shared.body?.cancel();
+  assert.match(
+    shared.headers.get("content-security-policy") ?? "",
+    /frame-ancestors 'none'$/,
+  );
 });

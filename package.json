@@ -4,29 +4,39 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --env ''",
-    "build": "wrangler deploy --env '' --dry-run --outdir dist",
-    "deploy": "wrangler deploy --env ''",
-    "deploy:production": "wrangler deploy --env production",
+    "dev": "bun run build:dashboard && wrangler dev --env ''",
+    "dev:dashboard": "vite --config dashboard/vite.config.ts --host 127.0.0.1",
+    "build:dashboard": "vite build --config dashboard/vite.config.ts",
+    "build": "bun run build:dashboard && wrangler deploy --env '' --dry-run --outdir dist",
+    "deploy": "bun run build:dashboard && wrangler deploy --env ''",
+    "deploy:production": "bun run build:dashboard && wrangler deploy --env production",
     "secret": "wrangler secret put PAGEPILOT_API_KEY --env ''",
     "secret:production": "wrangler secret put PAGEPILOT_API_KEY --env production",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p dashboard/tsconfig.json --noEmit",
     "test": "bun run build && node --test tests/worker.test.ts",
-    "lint": "oxlint src tests",
-    "format": "prettier --write src tests package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md",
-    "format:check": "prettier --check src tests package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md"
+    "lint": "oxlint src tests dashboard/src dashboard/vite.config.ts",
+    "format": "prettier --write src tests dashboard/src dashboard/vite.config.ts dashboard/tsconfig.json package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md",
+    "format:check": "prettier --check src tests dashboard/src dashboard/vite.config.ts dashboard/tsconfig.json package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "jose": "^6.2.12",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260916.1",
+    "@tanstack/react-query": "^5.103.1",
     "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "miniflare": "5.20260916.0-alpha",
     "oxlint": "^1.83.0",
     "prettier": "^3.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "typescript": "^5.7.0",
+    "vite": "^8.3.0",
     "wrangler": "^4.133.0"
   },
   "engines": {
