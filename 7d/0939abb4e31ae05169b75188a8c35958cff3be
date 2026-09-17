@@ -1,0 +1,25 @@
+wrangler.jsonc
+  s_e3bcceff98d0f8::t_247c487278ee97 3
+  s_e3bcceff98d0f8::t_ba594d742b84da 27
+  s_e3bcceff98d0f8::t_a95346b89c938c 38,41-44
+  s_e3bcceff98d0f8::t_2ec57ff3f952af 14,17-20
+  s_e3bcceff98d0f8::t_d1f5c98102f53d 60
+  s_e3bcceff98d0f8::t_630623678d262a 21
+  s_e3bcceff98d0f8::t_be080ffdb59eff 45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d0939abb4e31ae05169b75188a8c35958cff3be",
+  "prompts": {},
+  "sessions": {
+    "s_e3bcceff98d0f8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f53ad5f71ffeIlEG3nx11Kz4mx",
+        "model": "stealth/union-alpha"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
