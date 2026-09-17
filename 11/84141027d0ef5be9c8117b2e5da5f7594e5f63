@@ -1,0 +1,19 @@
+wrangler.jsonc
+  s_12e149e3893fc9::t_4d219e277bb609 22,46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1184141027d0ef5be9c8117b2e5da5f7594e5f63",
+  "prompts": {},
+  "sessions": {
+    "s_12e149e3893fc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06f903e4-dfe6-4790-b6ec-a8e5ca5c1c7c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
