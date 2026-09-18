@@ -56,10 +56,35 @@ page reads never reveal the key or hash. Missing/wrong keys cannot delete new pa
 Pages created before this change, or pages whose deletion key was lost, can be deleted
 by the authenticated owner dashboard. Old read links remain unchanged.
 
-Source layout: `src/` contains Worker code, `dashboard/src/` contains React UI,
-`tests/` contains local Worker integration tests. Old monorepo build-cache folders
-were removed. Built dashboard assets live in ignored `dashboard/dist/`; every asset
-request runs through the Worker first, so static delivery cannot bypass authentication.
+### Storage view
+
+`/dashboard/#/storage` shows how much of the bucket is in use: bytes used against the
+10 GB R2 free tier, page and object counts, growth by month and the ten largest pages.
+The numbers come from `GET /api/dashboard/storage`, which lists the bucket and adds up
+object sizes. It needs no extra credentials. One report reads at most 20,000 objects;
+past that it marks itself partial.
+
+### Landing page
+
+`/` serves `src/landing.html`, bundled into the Worker as a text module. It has no
+JavaScript and no external assets, so its CSP is `default-src 'none'` plus inline
+styles. Motion is CSS only: one-shot on load, or tied to scroll position.
+
+### Source layout
+
+- `shared/api.ts`: the dashboard API contract as zod schemas. The Worker builds its
+  responses from the inferred types and the dashboard parses with the same schemas.
+- `src/`: the Worker. `index.ts` routes; `mcp.ts`, `dashboard.ts`, `serve-page.ts`
+  handle requests; `pages.ts` and `storage.ts` talk to R2; `access.ts` verifies the
+  Cloudflare Access JWT; `http.ts` holds headers and response helpers.
+- `dashboard/src/`: the React UI. `app.tsx` is the shell, `pages-view.tsx` and
+  `storage-view.tsx` are the two views, `api.ts` holds the fetch calls.
+- `tests/`: Worker integration tests run against the built bundle in Miniflare.
+
+`tsconfig.base.json` carries the strict compiler settings that all three projects
+extend. Lint rejects `any`. Built dashboard assets live in ignored `dashboard/dist/`;
+every asset request runs through the Worker first, so static delivery cannot bypass
+authentication.
 
 ## Run locally
 

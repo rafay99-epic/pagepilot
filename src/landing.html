@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PagePilot</title>
+    <meta
+      name="description"
+      content="Agents publish HTML over MCP and get back a link. One Cloudflare Worker, one R2 bucket."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --dim: #a3a3a3;
+        --line: #262626;
+        --mono: ui-monospace, "SF Mono", Menlo, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+        background: #000;
+        color: #fff;
+        font:
+          17px/1.55 system-ui,
+          sans-serif;
+        font-synthesis: none;
+      }
+      body {
+        margin: 0;
+      }
+      a {
+        color: inherit;
+        text-underline-offset: 4px;
+      }
+      :focus-visible {
+        outline: 2px solid #fff;
+        outline-offset: 3px;
+      }
+      nav {
+        position: fixed;
+        inset: 0 0 auto;
+        display: flex;
+        gap: 28px;
+        align-items: center;
+        padding: 18px clamp(20px, 5vw, 72px);
+        font-size: 14px;
+        z-index: 2;
+        background: linear-gradient(#000 40%, #0000);
+      }
+      nav b {
+        margin-right: auto;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      nav a {
+        color: var(--dim);
+        text-decoration: none;
+      }
+      nav a:hover {
+        color: #fff;
+      }
+      .hero {
+        min-height: 100svh;
+        display: grid;
+        align-content: end;
+        padding: 0 clamp(20px, 5vw, 72px) 12svh;
+      }
+      .hdg {
+        font: 12px var(--mono);
+        color: var(--dim);
+        letter-spacing: 0.14em;
+        margin: 0 0 22px;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(40px, 7.4vw, 118px);
+        line-height: 0.98;
+        letter-spacing: -0.035em;
+        font-weight: 600;
+        max-width: 14ch;
+      }
+      h1 span {
+        color: var(--dim);
+      }
+      .hero p.sub {
+        max-width: 46ch;
+        margin: 28px 0 0;
+        color: var(--dim);
+      }
+      .cue {
+        margin-top: 48px;
+        font: 12px var(--mono);
+        color: var(--dim);
+        letter-spacing: 0.14em;
+        text-decoration: none;
+      }
+
+      /* The route: one line drawn by scrolling, a marker riding it, four waypoints. */
+      /* Waypoints and facts start shifted right before they scroll in; clip so that never widens the page. */
+      .route,
+      .facts {
+        overflow-x: clip;
+      }
+      .route {
+        position: relative;
+        height: 1700px;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 clamp(20px, 5vw, 72px);
+      }
+      .route svg {
+        position: absolute;
+        left: clamp(20px, 5vw, 72px);
+        top: 0;
+        width: 220px;
+        height: 1700px;
+        overflow: visible;
+      }
+      .route path {
+        fill: none;
+        stroke: #fff;
+        stroke-width: 1.5;
+      }
+      .route path.ghost {
+        stroke: var(--line);
+      }
+      .route circle {
+        fill: #000;
+        stroke: #fff;
+        stroke-width: 1.5;
+      }
+      .marker {
+        position: absolute;
+        left: clamp(20px, 5vw, 72px);
+        top: 0;
+        width: 0;
+        height: 0;
+        border: 7px solid transparent;
+        border-left: 13px solid #fff;
+        margin: -7px 0 0 -6px;
+        offset-path: path(
+          "M110 0 C110 180 30 260 30 440 S190 700 190 880 S30 1140 30 1320 S110 1560 110 1700"
+        );
+        offset-rotate: auto;
+      }
+      .wp {
+        position: absolute;
+        left: calc(clamp(20px, 5vw, 72px) + 270px);
+        right: clamp(20px, 5vw, 72px);
+        max-width: 560px;
+      }
+      .wp small {
+        font: 12px var(--mono);
+        color: var(--dim);
+        letter-spacing: 0.14em;
+      }
+      .wp h2 {
+        margin: 6px 0 10px;
+        font-size: clamp(26px, 3vw, 40px);
+        letter-spacing: -0.02em;
+        font-weight: 600;
+        line-height: 1.1;
+      }
+      .wp p {
+        margin: 0;
+        color: var(--dim);
+      }
+      .wp code {
+        font: 0.88em var(--mono);
+        color: #fff;
+      }
+      .w1 {
+        top: 120px;
+      }
+      .w2 {
+        top: 560px;
+      }
+      .w3 {
+        top: 1000px;
+      }
+      .w4 {
+        top: 1420px;
+      }
+
+      .facts {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 16svh clamp(20px, 5vw, 72px) 10svh;
+      }
+      .facts dl {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 40px 56px;
+        margin: 0;
+      }
+      .facts dt {
+        font: 12px var(--mono);
+        color: var(--dim);
+        letter-spacing: 0.14em;
+      }
+      .facts dd {
+        margin: 8px 0 0;
+        font-size: 22px;
+        letter-spacing: -0.01em;
+      }
+      footer {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 40px clamp(20px, 5vw, 72px) 64px;
+        display: flex;
+        gap: 28px;
+        flex-wrap: wrap;
+        font-size: 14px;
+        color: var(--dim);
+        border-top: 1px solid var(--line);
+      }
+      footer span {
+        margin-right: auto;
+      }
+
+      @media (max-width: 760px) {
+        .route svg {
+          width: 90px;
+        }
+        .route path {
+          transform: scaleX(0.4);
+        }
+        .route circle {
+          display: none;
+        }
+        .marker {
+          display: none;
+        }
+        .wp {
+          left: calc(clamp(20px, 5vw, 72px) + 100px);
+        }
+      }
+
+      /* Motion only where the browser can tie it to scrolling. Otherwise everything is simply visible. */
+      @media (prefers-reduced-motion: no-preference) {
+        h1,
+        .hdg,
+        .hero .sub {
+          animation: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+        }
+        h1 {
+          animation-delay: 0.08s;
+        }
+        .hero .sub {
+          animation-delay: 0.2s;
+        }
+        @keyframes rise {
+          from {
+            opacity: 0;
+            transform: translateY(28px);
+          }
+        }
+        @supports (animation-timeline: view()) {
+          .route {
+            view-timeline: --route block;
+          }
+          .route path.live {
+            stroke-dasharray: 1;
+            stroke-dashoffset: 1;
+            animation: draw linear both;
+            animation-timeline: --route;
+            animation-range: cover 12% cover 78%;
+          }
+          @keyframes draw {
+            to {
+              stroke-dashoffset: 0;
+            }
+          }
+          .marker {
+            animation: fly linear both;
+            animation-timeline: --route;
+            animation-range: cover 12% cover 78%;
+          }
+          @keyframes fly {
+            from {
+              offset-distance: 0%;
+            }
+            to {
+              offset-distance: 100%;
+            }
+          }
+          .wp,
+          .facts dl > div {
+            animation: arrive linear both;
+            animation-timeline: view();
+            animation-range: entry 5% cover 32%;
+          }
+          @keyframes arrive {
+            from {
+              opacity: 0;
+              transform: translateX(36px);
+            }
+          }
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <b>PagePilot</b><a href="#route">Route</a><a href="#limits">Limits</a
+      ><a href="https://github.com/rafay99-epic/pagepilot">Source</a
+      ><a href="/dashboard/">Sign in</a>
+    </nav>
+
+    <section class="hero">
+      <p class="hdg">MCP / WORKER / R2</p>
+      <h1>Your agent writes HTML. <span>PagePilot lands it on a link.</span></h1>
+      <p class="sub">
+        A plan, a mock, a report. One tool call publishes it and hands back a URL you can
+        open anywhere.
+      </p>
+      <a class="cue" href="#route">FOLLOW THE ROUTE</a>
+    </section>
+
+    <section class="route" id="route">
+      <svg viewBox="0 0 220 1700" aria-hidden="true">
+        <path
+          class="ghost"
+          d="M110 0 C110 180 30 260 30 440 S190 700 190 880 S30 1140 30 1320 S110 1560 110 1700"
+        />
+        <path
+          class="live"
+          pathLength="1"
+          d="M110 0 C110 180 30 260 30 440 S190 700 190 880 S30 1140 30 1320 S110 1560 110 1700"
+        />
+        <circle cx="90" cy="150" r="5" />
+        <circle cx="75" cy="600" r="5" />
+        <circle cx="145" cy="1040" r="5" />
+        <circle cx="49" cy="1460" r="5" />
+      </svg>
+      <div class="marker" aria-hidden="true"></div>
+      <article class="wp w1">
+        <small>01 DEPARTURE</small>
+        <h2>The agent calls one tool</h2>
+        <p>
+          <code>deploy_page</code> over MCP at <code>/api/mcp</code>, with a Bearer key.
+          Claude Code, Codex, anything that speaks the protocol.
+        </p>
+      </article>
+      <article class="wp w2">
+        <small>02 IN FLIGHT</small>
+        <h2>A Worker checks it in</h2>
+        <p>
+          Size capped at 900 KB. The page gets a 128 bit id nobody can guess and a
+          deletion key shown exactly once.
+        </p>
+      </article>
+      <article class="wp w3">
+        <small>03 HANGAR</small>
+        <h2>R2 keeps the file</h2>
+        <p>
+          One private bucket. No database, no build step, no cold start worth measuring.
+        </p>
+      </article>
+      <article class="wp w4">
+        <small>04 ARRIVAL</small>
+        <h2>You get a link</h2>
+        <p>
+          <code>/p/9f2c41ab…</code> opens on any device. Sandboxed, never indexed, gone
+          the moment you delete it.
+        </p>
+      </article>
+    </section>
+
+    <section class="facts" id="limits">
+      <dl>
+        <div>
+          <dt>PER PAGE</dt>
+          <dd>900 KB of HTML</dd>
+        </div>
+        <div>
+          <dt>LINK</dt>
+          <dd>128 bit, unlisted, noindex</dd>
+        </div>
+        <div>
+          <dt>TOOLS</dt>
+          <dd>deploy, list, delete</dd>
+        </div>
+        <div>
+          <dt>RUNS ON</dt>
+          <dd>One Worker, one R2 bucket</dd>
+        </div>
+      </dl>
+    </section>
+
+    <footer>
+      <span>PagePilot</span
+      ><a href="https://github.com/rafay99-epic/pagepilot">Source on GitHub</a
+      ><a href="/dashboard/">Owner sign in</a>
+    </footer>
+  </body>
+</html>

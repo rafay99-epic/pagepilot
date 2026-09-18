@@ -14,9 +14,9 @@
     "secret:production": "wrangler secret put PAGEPILOT_API_KEY --env production",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p dashboard/tsconfig.json --noEmit",
     "test": "bun run build && node --test tests/worker.test.ts",
-    "lint": "oxlint src tests dashboard/src dashboard/vite.config.ts",
-    "format": "prettier --write src tests dashboard/src dashboard/vite.config.ts dashboard/tsconfig.json package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md",
-    "format:check": "prettier --check src tests dashboard/src dashboard/vite.config.ts dashboard/tsconfig.json package.json tsconfig.json tsconfig.test.json wrangler.jsonc README.md"
+    "lint": "oxlint --deny typescript/no-explicit-any src shared tests dashboard/src dashboard/vite.config.ts",
+    "format": "prettier --write src shared tests dashboard/src dashboard/vite.config.ts dashboard/tsconfig.json package.json tsconfig.json tsconfig.base.json tsconfig.test.json wrangler.jsonc README.md",
+    "format:check": "prettier --check src shared tests dashboard/src dashboard/vite.config.ts dashboard/tsconfig.json package.json tsconfig.json tsconfig.base.json tsconfig.test.json wrangler.jsonc README.md"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

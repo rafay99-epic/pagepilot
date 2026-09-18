@@ -24,3 +24,6 @@ npm-debug.log*
 !.dev.vars.example
 .env.*
 .firecrawl/
+
+# Agent scratch
+.frugal-fable/

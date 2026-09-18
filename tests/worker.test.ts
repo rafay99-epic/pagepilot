@@ -3,16 +3,26 @@ import { after, before, test } from "node:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
 import { SignJWT } from "jose";
 import { generateKeyPairSync } from "node:crypto";
+import { readdirSync } from "node:fs";
 
 const key = "local-test-key-not-a-production-secret";
 const base = "https://pagepilot.test";
+// Wrangler emits the landing page as a hashed text module beside the bundle,
+// so every Miniflare instance loads the bundle plus whatever HTML dist holds.
+const workerModules = [
+  { type: "ESModule" as const, path: "dist/index.js" },
+  ...readdirSync("dist")
+    .filter((name) => name.endsWith(".html"))
+    .map((name) => ({ type: "Text" as const, path: `dist/${name}` })),
+];
 const mf = new Miniflare(
   convertV4MiniflareOptions({
-    modules: true,
-    scriptPath: "dist/index.js",
+    modules: workerModules,
+    modulesRoot: "dist",
     compatibilityDate: "2026-09-16",
     compatibilityFlags: ["nodejs_compat"],
     r2Buckets: ["PAGES"],
@@ -30,7 +40,11 @@ after(async () => {
   await mf.dispose();
 });
 
-async function rpc(method: string, params?: unknown) {
+// Every value JSON.parse can produce, which is everything a JSON-RPC call can
+// carry as params or tool arguments.
+type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
+
+async function rpc(method: string, params?: Json) {
   const response = await mf.dispatchFetch(`${base}/api/mcp`, {
     method: "POST",
     headers: {
@@ -52,7 +66,7 @@ const resultSchema = z.object({
   }),
 });
 
-async function callTool(name: string, args?: unknown) {
+async function callTool(name: string, args?: Json) {
   const result = resultSchema.parse(
     await rpc("tools/call", {
       name,
@@ -92,7 +106,7 @@ async function publish(html = "<!doctype html><h1>Hello</h1>", title = "Test") {
 
 test("backend starts; API key protects all MCP methods and origins", async () => {
   assert.equal(await (await mf.dispatchFetch(`${base}/health`)).text(), "ok");
-  assert.equal((await mf.dispatchFetch(`${base}/`)).status, 404);
+  assert.equal((await mf.dispatchFetch(`${base}/`)).status, 200);
   assert.equal((await mf.dispatchFetch(`${base}/dashboard`)).status, 503);
   for (const method of ["POST", "GET", "DELETE", "OPTIONS"]) {
     const response = await mf.dispatchFetch(`${base}/api/mcp`, { method });
@@ -134,8 +148,8 @@ test("backend starts; API key protects all MCP methods and origins", async () =>
 test("missing key fails closed", async () => {
   const unconfigured = new Miniflare(
     convertV4MiniflareOptions({
-      modules: true,
-      scriptPath: "dist/index.js",
+      modules: workerModules,
+      modulesRoot: "dist",
       compatibilityDate: "2026-09-16",
       compatibilityFlags: ["nodejs_compat"],
       r2Buckets: ["PAGES"],
@@ -153,7 +167,10 @@ test("missing key fails closed", async () => {
 
 test("official MCP client initializes, discovers and invokes tools", async () => {
   const client = new Client({ name: "pagepilot-test", version: "1.0.0" });
-  const transport = new StreamableHTTPClientTransport(
+  // The SDK types sessionId as an optional string but the client class exposes
+  // `string | undefined`, which exactOptionalPropertyTypes rejects. Nothing
+  // here reads the session id, so drop it from the type we hand to connect().
+  const transport: Omit<Transport, "sessionId"> = new StreamableHTTPClientTransport(
     new URL("/api/mcp", await mf.ready),
     {
       requestInit: { headers: { authorization: `Bearer ${key}` } },
@@ -293,8 +310,8 @@ test("upload validation checks UTF-8 bytes and malformed input", async () => {
 test("production canonical URL overrides preview request origin", async () => {
   const production = new Miniflare(
     convertV4MiniflareOptions({
-      modules: true,
-      scriptPath: "dist/index.js",
+      modules: workerModules,
+      modulesRoot: "dist",
       compatibilityDate: "2026-09-16",
       compatibilityFlags: ["nodejs_compat"],
       r2Buckets: ["PAGES"],
@@ -359,8 +376,8 @@ function signAccessJwt(
 
 const accessMf = new Miniflare(
   convertV4MiniflareOptions({
-    modules: true,
-    scriptPath: "dist/index.js",
+    modules: workerModules,
+    modulesRoot: "dist",
     compatibilityDate: "2026-09-16",
     compatibilityFlags: ["nodejs_compat"],
     r2Buckets: ["PAGES"],
@@ -429,8 +446,8 @@ test("dashboard rejects missing, tampered, expired and mismatched tokens", async
   }
   const wrongKey = await new Miniflare(
     convertV4MiniflareOptions({
-      modules: true,
-      scriptPath: "dist/index.js",
+      modules: workerModules,
+      modulesRoot: "dist",
       compatibilityDate: "2026-09-16",
       compatibilityFlags: ["nodejs_compat"],
       r2Buckets: ["PAGES"],
@@ -483,7 +500,10 @@ test("dashboard owner lists and deletes with origin and legacy handling", async 
   });
   const deployResult = resultSchema.parse(await deploy.json()).result;
   assert.ok(!deployResult.isError);
-  const id = deployResult.content[0]!.text.split("\n")[1]!.split("/").at(-1)!;
+  const deployed = deployResult.content[0]?.text.split("\n")[1];
+  assert.ok(deployed);
+  const id = deployed.split("/").at(-1);
+  assert.ok(id);
   await bucket.put(
     `pages/012345abcdef~${Buffer.from("Old").toString("base64url")}.html`,
     "<p>old</p>",
@@ -570,4 +590,86 @@ test("dashboard preview is owner-only and framable only by the dashboard", async
     shared.headers.get("content-security-policy") ?? "",
     /frame-ancestors 'none'$/,
   );
+});
+
+// Mirrors storageReportSchema in shared/api.ts; the NodeNext test config
+// cannot import that module without a .ts extension import.
+const count = z.number().int().nonnegative();
+const storageSchema = z.object({
+  usedBytes: count,
+  freeTierBytes: count,
+  objectCount: count,
+  pageCount: count,
+  complete: z.boolean(),
+  months: z.array(
+    z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), bytes: count, pages: count }),
+  ),
+  largest: z
+    .array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        url: z.string().url(),
+        createdAt: z.string().datetime(),
+        bytes: count,
+      }),
+    )
+    .max(10),
+});
+
+test("storage report is owner-only and counts pages apart from other objects", async () => {
+  const anonymous = await dashboard("/api/dashboard/storage", { token: null });
+  assert.equal(anonymous.status, 403);
+
+  const bucket = await accessMf.getR2Bucket("PAGES");
+  const existing = await bucket.list();
+  if (existing.objects.length > 0) {
+    await bucket.delete(existing.objects.map((object) => object.key));
+  }
+  const bigId = "a".repeat(32);
+  const smallId = "b0".repeat(16);
+  await bucket.put(`pages/${bigId}.html`, "x".repeat(400), {
+    customMetadata: { title: "Big" },
+  });
+  await bucket.put(`pages/${smallId}.html`, "x".repeat(50));
+  await bucket.put("uploads/notes.txt", "x".repeat(7));
+
+  const response = await dashboard("/api/dashboard/storage");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const report = storageSchema.parse(await response.json());
+  assert.equal(report.usedBytes, 457);
+  assert.equal(report.objectCount, 3);
+  assert.equal(report.pageCount, 2);
+  assert.equal(report.freeTierBytes, 10_000_000_000);
+  assert.equal(report.complete, true);
+  assert.deepEqual(report.months, [
+    { month: new Date().toISOString().slice(0, 7), bytes: 450, pages: 2 },
+  ]);
+  assert.deepEqual(
+    report.largest.map((page) => [page.id, page.bytes, page.title]),
+    [
+      [bigId, 400, "Big"],
+      [smallId, 50, smallId],
+    ],
+  );
+  assert.equal(report.largest[0]?.url, `${base}/p/${bigId}`);
+});
+
+test("landing page answers GET and HEAD at the root", async () => {
+  const response = await mf.dispatchFetch(`${base}/`);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
+  assert.equal(response.headers.get("cache-control"), "public, max-age=300");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(
+    response.headers.get("content-security-policy"),
+    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  );
+  assert.match(await response.text(), /PagePilot/);
+
+  const head = await mf.dispatchFetch(`${base}/`, { method: "HEAD" });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
 });

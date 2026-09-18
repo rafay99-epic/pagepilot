@@ -1,14 +1,10 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
     "lib": ["ES2022", "DOM"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "types": ["node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "skipLibCheck": true,
-    "noEmit": true
+    "types": ["node"]
   },
   "include": ["tests/**/*.ts"]
 }
