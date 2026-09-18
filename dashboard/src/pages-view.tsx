@@ -1,22 +1,31 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState, type KeyboardEvent } from "react";
-import { listPages } from "./api";
+import type { Page } from "../../shared/api";
+import { listAllPages } from "./api";
 import { shortDate } from "./format";
 import { PagePreview } from "./page-preview";
 import { QueryError } from "./query-error";
 
-// Two panes: a searchable list on the left, PagePreview on the right.
+const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+
+// Pages arrive newest first, so grouping in order keeps months in order too.
+function groupByMonth(pages: Page[]) {
+  const groups = new Map<string, Page[]>();
+  for (const page of pages) {
+    const label = monthLabel.format(new Date(page.createdAt));
+    groups.set(label, [...(groups.get(label) ?? []), page]);
+  }
+  return [...groups];
+}
+
+// Two panes: a searchable list on the left, PagePreview on the right. On a
+// phone only one shows at a time; `open` says whether the preview is up.
 export function PagesView() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const query = useInfiniteQuery({
-    queryKey: ["pages"],
-    queryFn: ({ pageParam }) => listPages(pageParam),
-    initialPageParam: "",
-    getNextPageParam: (last) => last.nextCursor,
-    retry: false,
-  });
-  const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const [open, setOpen] = useState(false);
+  const query = useQuery({ queryKey: ["pages"], queryFn: listAllPages, retry: false });
+  const items = query.data ?? [];
   const filtered = items.filter((page) =>
     `${page.title} ${page.id}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -33,7 +42,7 @@ export function PagesView() {
   }
 
   return (
-    <div className="pages-view">
+    <div className={open ? "pages-view open" : "pages-view"}>
       <section className="list" aria-label="Pages" onKeyDown={moveSelection}>
         <header>
           <input
@@ -53,35 +62,35 @@ export function PagesView() {
             {items.length ? "No match." : "No pages yet. Publish one through your agent."}
           </p>
         )}
-        <ul>
-          {filtered.map((page) => (
-            <li key={page.id}>
-              <button
-                id={`page-${page.id}`}
-                aria-current={page.id === selected?.id}
-                onClick={() => setSelectedId(page.id)}
-              >
-                <span>{page.title}</span>
-                <time dateTime={page.createdAt}>
-                  {shortDate.format(new Date(page.createdAt))}
-                </time>
-              </button>
-            </li>
+        <div className="rows">
+          {groupByMonth(filtered).map(([month, pages]) => (
+            <section key={month} aria-label={month}>
+              <h2>{month}</h2>
+              <ul>
+                {pages.map((page) => (
+                  <li key={page.id}>
+                    <button
+                      id={`page-${page.id}`}
+                      aria-current={page.id === selected?.id}
+                      onClick={() => {
+                        setSelectedId(page.id);
+                        setOpen(true);
+                      }}
+                    >
+                      <span>{page.title}</span>
+                      <time dateTime={page.createdAt}>
+                        {shortDate.format(new Date(page.createdAt))}
+                      </time>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
-        {query.hasNextPage && (
-          <button
-            className="more"
-            disabled={query.isFetching}
-            onClick={() => void query.fetchNextPage()}
-          >
-            {query.isFetchingNextPage ? "Loading…" : "Load more"}
-          </button>
-        )}
+        </div>
         <footer>
           <span>
             {items.length} {items.length === 1 ? "page" : "pages"}
-            {query.hasNextPage ? "+" : ""}
           </span>
           <button disabled={query.isFetching} onClick={() => void query.refetch()}>
             Refresh
@@ -90,7 +99,7 @@ export function PagesView() {
       </section>
       <section className="preview" aria-label="Preview">
         {selected ? (
-          <PagePreview key={selected.id} page={selected} />
+          <PagePreview key={selected.id} page={selected} onBack={() => setOpen(false)} />
         ) : (
           query.data && <p className="empty">Nothing selected.</p>
         )}

@@ -4,15 +4,17 @@ import type { Page } from "../../shared/api";
 import { deletePage } from "./api";
 
 // Right pane: the selected page in a sandboxed iframe, loaded through the
-// owner-only preview route, plus its actions. Keyed by page id in PagesView
+// owner-only preview route, plus its actions. On a phone it covers the list
+// and `onBack` returns to it. Keyed by page id in PagesView
 // so the confirmation and notice reset when the selection changes.
-export function PagePreview({ page }: { page: Page }) {
+export function PagePreview({ page, onBack }: { page: Page; onBack: () => void }) {
   const client = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
   const remove = useMutation({
     mutationFn: deletePage,
     onSuccess: () => {
+      onBack();
       client.invalidateQueries({ queryKey: ["pages"] });
       client.invalidateQueries({ queryKey: ["storage"] });
     },
@@ -21,6 +23,9 @@ export function PagePreview({ page }: { page: Page }) {
   return (
     <>
       <header>
+        <button className="back" aria-label="Back to list" onClick={onBack}>
+          ←
+        </button>
         <div className="meta">
           <h2>{page.title}</h2>
           <p>
@@ -77,6 +82,7 @@ export function PagePreview({ page }: { page: Page }) {
       <iframe
         title={page.title}
         src={`/api/dashboard/pages/${page.id}/preview`}
+        loading="lazy"
         sandbox="allow-scripts allow-popups"
         referrerPolicy="no-referrer"
       />

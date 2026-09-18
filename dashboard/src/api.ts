@@ -2,6 +2,7 @@
 // contract drift between the Worker and this dashboard fails loudly here
 // instead of surfacing as a silent rendering bug.
 import { z } from "zod";
+import type { Page } from "../../shared/api";
 import { pageListSchema, pageSchema, storageReportSchema } from "../../shared/api";
 
 export const SESSION_EXPIRED = "session-expired";
@@ -49,13 +50,24 @@ async function fetchDashboard(
   return response;
 }
 
-export async function listPages(cursor: string) {
-  const response = await fetchDashboard(
-    `/api/dashboard/pages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
-    {},
-    "Could not load pages.",
-  );
-  return pageListWithOrigin.parse(await response.json());
+// Every page, newest first. The Worker lists in key order, and keys are random
+// ids, so a sensible order needs the full set.
+// ponytail: loads the whole vault up front, 100 pages per request. Fine into
+// the low thousands; past that, keep a date-sorted index on write and page it.
+export async function listAllPages() {
+  const items: Page[] = [];
+  let cursor = "";
+  do {
+    const response = await fetchDashboard(
+      `/api/dashboard/pages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+      {},
+      "Could not load pages.",
+    );
+    const batch = pageListWithOrigin.parse(await response.json());
+    items.push(...batch.items);
+    cursor = batch.nextCursor ?? "";
+  } while (cursor);
+  return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function deletePage(id: string) {

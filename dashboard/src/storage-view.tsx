@@ -127,7 +127,7 @@ export function StorageView() {
             <thead>
               <tr>
                 <th>Month</th>
-                <th>Added</th>
+                <th className="wide">Added</th>
                 <th>Pages</th>
                 <th>Total</th>
                 <th></th>
@@ -137,7 +137,7 @@ export function StorageView() {
               {monthsNewestFirst.map((entry) => (
                 <tr key={entry.month}>
                   <td>{formatMonth(entry.month)}</td>
-                  <td>{formatBytes(entry.bytes)}</td>
+                  <td className="wide">{formatBytes(entry.bytes)}</td>
                   <td>{entry.pages}</td>
                   <td>{formatBytes(entry.total)}</td>
                   <td className="storage-bar-cell">
@@ -159,7 +159,7 @@ export function StorageView() {
               <tr>
                 <th>Title</th>
                 <th>Size</th>
-                <th>Created</th>
+                <th className="wide">Created</th>
               </tr>
             </thead>
             <tbody>
@@ -171,7 +171,7 @@ export function StorageView() {
                     </a>
                   </td>
                   <td>{formatBytes(page.bytes)}</td>
-                  <td>{shortDate.format(new Date(page.createdAt))}</td>
+                  <td className="wide">{shortDate.format(new Date(page.createdAt))}</td>
                 </tr>
               ))}
             </tbody>
