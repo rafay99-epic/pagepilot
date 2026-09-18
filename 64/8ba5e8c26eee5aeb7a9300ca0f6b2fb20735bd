@@ -1,0 +1,105 @@
+dashboard/src/format.ts
+  s_12e149e3893fc9::t_2802992633fe29 2-5
+  s_12e149e3893fc9::t_bf13e976a63133 1
+src/landing.html
+  s_12e149e3893fc9::t_07367baf5e7e5c 1-6,11,23-24,31-33,172,302-305,398-399
+  s_12e149e3893fc9::t_a3a3cb04d7ee34 7-10,12-22,25-30,34-100,106-171,173-301,306-397
+  s_12e149e3893fc9::t_990c7cf946568d 101-105
+src/env.ts
+  s_12e149e3893fc9::t_663491b5b58b37 1-11
+dashboard/tsconfig.json
+  s_12e149e3893fc9::t_24c6459c522c9d 2,8,10
+dashboard/src/main.tsx
+  s_12e149e3893fc9::t_648e554cee112d 6-8,15
+src/html.d.ts
+  s_12e149e3893fc9::t_2d84ed2abaed1e 1-5
+dashboard/src/app.tsx
+  s_12e149e3893fc9::t_b050c21720eb0f 1-3,6,8-10,13-14,17-19,21-22,24-37,41,43,46-47
+tests/worker.test.ts
+  s_12e149e3893fc9::t_7c2868d8e89e7c 379-380
+  s_12e149e3893fc9::t_88c82e18794cd5 151-152
+  s_12e149e3893fc9::t_73116718ae944f 170-173
+  s_12e149e3893fc9::t_c2204eba11ac96 313-314
+  s_12e149e3893fc9::t_d085df737d8916 14-21
+  s_12e149e3893fc9::t_db4833c9b61f74 449-450
+  s_12e149e3893fc9::t_d4491a34b38a14 69
+  s_12e149e3893fc9::t_ae5591d7704e00 503-506
+  s_12e149e3893fc9::t_13710840ad639b 10
+  s_12e149e3893fc9::t_0700a376fd6ec5 43-47
+  s_12e149e3893fc9::t_fb387aa884b235 109
+  s_12e149e3893fc9::t_859dba63a66b22 594-675
+  s_12e149e3893fc9::t_054c47659492e8 24-25
+  s_12e149e3893fc9::t_c657ff75b1b0a2 6
+dashboard/src/pages-view.tsx
+  s_12e149e3893fc9::t_73f7e8cfb76810 1-100
+src/dashboard.ts
+  s_12e149e3893fc9::t_185bff49672d42 1-73
+shared/api.ts
+  s_12e149e3893fc9::t_24c6459c522c9d 1-51
+.gitignore
+  s_12e149e3893fc9::t_24c6459c522c9d 27-29
+tsconfig.base.json
+  s_12e149e3893fc9::t_24c6459c522c9d 1-23
+tsconfig.json
+  s_12e149e3893fc9::t_24c6459c522c9d 2,7,9
+dashboard/src/style.css
+  s_12e149e3893fc9::t_d8c3f57d9c4db4 77-118
+  s_12e149e3893fc9::t_ef3dbbcca8dbe6 297,310
+  s_12e149e3893fc9::t_9fc8985cb29d8d 288-296,298,301-302,304,307-308,311-315
+  s_12e149e3893fc9::t_f1e161ecfbffac 369
+  s_12e149e3893fc9::t_810ea3eb8a0340 26-27
+  s_12e149e3893fc9::t_356747634b7bdd 267-287,299-300,303,305-306,309,316-368,370-375,377,388-393
+package.json
+  s_12e149e3893fc9::t_24c6459c522c9d 17-19
+src/mcp.ts
+  s_12e149e3893fc9::t_dca42e4e6983f5 1-180
+README.md
+  s_12e149e3893fc9::t_051d658239ff20 59-87
+dashboard/src/query-error.tsx
+  s_12e149e3893fc9::t_792e83a52aea71 1-16
+tsconfig.test.json
+  s_12e149e3893fc9::t_24c6459c522c9d 2,7
+src/index.ts
+  s_12e149e3893fc9::t_d3fa6423c8e25d 1-6,25-31
+  s_12e149e3893fc9::t_ed5017886fe9f4 32
+dashboard/src/page-preview.tsx
+  s_12e149e3893fc9::t_af055dbcf09e68 1-85
+src/serve-page.ts
+  s_12e149e3893fc9::t_894fed64de5656 1-41
+src/pages.ts
+  s_12e149e3893fc9::t_be2979a40721af 7
+  s_12e149e3893fc9::t_27d1c08002215f 1-6,8-70
+dashboard/src/api.ts
+  s_12e149e3893fc9::t_9ff95be41ad388 1-36,42-69,75-76
+  s_12e149e3893fc9::t_2802992633fe29 37-41,70-74
+src/access.ts
+  s_12e149e3893fc9::t_0463c49a4704aa 6
+  s_12e149e3893fc9::t_1236da85e86068 1-5,7-47
+dashboard/src/storage-view.tsx
+  s_12e149e3893fc9::t_9fc8985cb29d8d 76-77,90-97
+  s_12e149e3893fc9::t_e56df06d3699b7 1-7,9-16,19-26,32-34,36-75,78-89,98-146,149-183
+  s_12e149e3893fc9::t_08b60fd3342422 8,17-18
+  s_12e149e3893fc9::t_55d968521fc23e 31,35
+  s_12e149e3893fc9::t_2802992633fe29 147-148
+  s_12e149e3893fc9::t_ff9ed5f323214d 27-30
+src/storage.ts
+  s_12e149e3893fc9::t_07eefb15f2de59 1-54
+src/http.ts
+  s_12e149e3893fc9::t_3463f036f04cc1 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "648ba5e8c26eee5aeb7a9300ca0f6b2fb20735bd",
+  "prompts": {},
+  "sessions": {
+    "s_12e149e3893fc9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "06f903e4-dfe6-4790-b6ec-a8e5ca5c1c7c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
