@@ -1,0 +1,49 @@
+src/assets.ts
+  s_648bd00a06ea33::t_e85816d9815c2a 19-21,32-34,36,102,126,136-137,139-156
+  s_648bd00a06ea33::t_ec762301c852f2 37
+  s_648bd00a06ea33::t_d4f41ec8818b51 5,35,38,101,103-105,110
+src/mcp.ts
+  s_648bd00a06ea33::t_d2ddace7aa7459 7-8,33-46,105-113,149,152-153,181,185,189,205,217-219,222,225,228,237-239,249,258-263,267,271,277,293,308,314,344
+  s_648bd00a06ea33::t_c4a5f242efe19b 179-180,182-183,198
+  s_648bd00a06ea33::t_9f5f9dd5ff28c5 162,174,184,186-188,190-194,215-216,223-224,226-227,236,250-253,255,257,264-266,268-270,272-273,322
+  s_648bd00a06ea33::t_bacf628638957e 229-235
+docs/connect-an-agent.md
+  s_648bd00a06ea33::t_40fb560d8449f2 104-106
+  s_648bd00a06ea33::t_ec811f4b36108e 63-65,107-108
+  s_648bd00a06ea33::t_c4a5f242efe19b 97-98
+  s_648bd00a06ea33::t_f08c2a78f50195 46,62,66,102
+src/ledger.ts
+  s_648bd00a06ea33::t_e6c3e4c3d06d1e 71,76,79-81,145-148,150-151,166
+  s_648bd00a06ea33::t_d4f41ec8818b51 77-78,82-83,90,132-135,141-144,152,158,162-165,170,185
+src/dashboard.ts
+  s_648bd00a06ea33::t_e6c3e4c3d06d1e 68
+src/pages.ts
+  s_648bd00a06ea33::t_e6c3e4c3d06d1e 91-93,96-98,129-130,167-168,170,172-173
+  s_648bd00a06ea33::t_9f5f9dd5ff28c5 128,131
+src/landing.html
+  s_648bd00a06ea33::t_e85816d9815c2a 358
+src/serve-page.ts
+  s_648bd00a06ea33::t_e6c3e4c3d06d1e 25
+  s_648bd00a06ea33::t_e85816d9815c2a 28-31
+docs/reference.md
+  s_648bd00a06ea33::t_f08c2a78f50195 25-26,31
+tests/worker.test.ts
+  s_648bd00a06ea33::t_69d1812ca74229 314-317
+  s_648bd00a06ea33::t_8c9cb5dd74c654 267-268,271,273-278,301-313,454-474,476,491-493,530-531,535-583
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dda72ca92ea5174d91118352ee90be7b62bf0030",
+  "prompts": {},
+  "sessions": {
+    "s_648bd00a06ea33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cfb2b89f-7ff4-4dd6-9335-6f2c1c2b8517",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Abdul Rafay <99marafay@gmail.com>"
+    }
+  }
+}
