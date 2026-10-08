@@ -88,9 +88,14 @@ export async function scanPages(
   base: string,
 ): Promise<{ pages: Page[]; complete: boolean }> {
   const { objects, complete } = await listAll(bucket, "pages/");
+  // An interrupted legacy move leaves two objects for one id. The current key
+  // sorts first, so that is the one listed.
+  const seen = new Set<string>();
   const pages = objects.flatMap((object) => {
     const record = pageRecord(object, base);
-    return record ? [record] : [];
+    if (!record || seen.has(record.id)) return [];
+    seen.add(record.id);
+    return [record];
   });
   return { pages: pages.sort(newestFirst), complete };
 }
@@ -120,9 +125,10 @@ export async function listPages(
     const [updatedAt, id] = Buffer.from(filter.cursor, "base64url")
       .toString("utf8")
       .split("|");
-    if (!updatedAt || !id || Number.isNaN(Date.parse(updatedAt)) || !PAGE_ID.test(id)) {
-      throw new Error("Invalid cursor");
-    }
+    // Only the exact timestamp a cursor was built from sorts where it should.
+    // toISOString throws on anything that is not a date at all.
+    const exact = !!updatedAt && new Date(updatedAt).toISOString() === updatedAt;
+    if (!exact || !id || !PAGE_ID.test(id)) throw new Error("Invalid cursor");
     from = { updatedAt, id };
   }
   const matches = pages.filter((page) => {
@@ -158,11 +164,12 @@ export async function findPage<T extends R2Object>(
   return legacy ? await read(legacy) : null;
 }
 
-// Deletes a page: its object, a legacy twin an interrupted update may have
-// left behind, and what the ledger knows about it. Images only this page
+// Deletes a page: its object under either key format, the version its last
+// update replaced, and what the ledger knows about it. Images only this page
 // embedded follow a day later.
-export async function removePage(env: Env, id: string, key: string): Promise<void> {
+export async function removePage(env: Env, id: string): Promise<void> {
   const legacy = await legacyKey(env.PAGES, id);
-  await env.PAGES.delete(legacy && legacy !== key ? [key, legacy] : key);
+  const keys = [`pages/${id}.html`, `previous/${id}.html`];
+  await env.PAGES.delete(legacy ? [...keys, legacy] : keys);
   await forgetPage(env, id);
 }

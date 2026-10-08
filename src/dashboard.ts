@@ -65,7 +65,7 @@ export async function handleDashboard(request: Request, env: Env): Promise<Respo
       if (!PAGE_ID.test(id)) return dashboardJson({ error: "Invalid page id" }, 400);
       const object = await findPage(env.PAGES, id, (key) => env.PAGES.head(key));
       if (!object) return dashboardJson({ error: "Page not found" }, 404);
-      await removePage(env, id, object.key);
+      await removePage(env, id);
       return dashboardJson({ id, deleted: true });
     }
     return dashboardJson({ error: "Not found" }, 404);

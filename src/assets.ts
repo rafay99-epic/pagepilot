@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Env } from "./env";
 import { objectResponse, publicBase, SECURITY_HEADERS } from "./http";
+import { trackUpload } from "./ledger";
 
 // Raster images only. Assets are served from the dashboard's origin, so
 // nothing that can run script (SVG, HTML) is accepted.
@@ -15,7 +16,9 @@ export const ASSET_TYPES = [
 
 // `<32 hex id>.<image subtype>`; the extension decides the content type.
 const ASSET_NAME = /^[a-f0-9]{32}\.(png|jpeg|webp|gif|avif)$/;
-const ASSET_MENTION = /[a-f0-9]{32}\.(?:png|jpeg|webp|gif|avif)/g;
+const ASSET_ID = /^[a-f0-9]{32}$/;
+const ASSET_TYPE = /\.(?:png|jpeg|webp|gif|avif)/g;
+const ASSET_LINK = /\/a\/([a-f0-9]{32}\.(?:png|jpeg|webp|gif|avif))/g;
 const MAX_ASSET_BYTES = 10_000_000;
 const UPLOAD_TTL_SECONDS = 600;
 
@@ -25,6 +28,13 @@ const ASSET_HEADERS = {
   // Revalidated on every load so a deleted image stops showing.
   "cache-control": "private, no-cache",
 };
+
+// How the accepted formats open, read as latin1. It catches the wrong file,
+// such as an error page saved as shot.png; it is not what keeps a crafted file
+// harmless, the response headers are. Any of the five passes, since browsers
+// render an image by its bytes, whatever type its name claims.
+const IMAGE_START =
+  /^(?:\x89PNG\r\n.\n|\xff\xd8\xff|GIF8[79]a|RIFF.{4}WEBP|.{4}ftyp.{0,52}avi[fs])/s;
 
 function sign(apiKey: string, name: string, expires: number): string {
   return createHmac("sha256", apiKey)
@@ -88,11 +98,16 @@ export async function handleUpload(
   if (length > MAX_ASSET_BYTES) {
     return uploadJson({ error: "Image exceeds the 10 MB limit" }, 413);
   }
-  const object = await env.PAGES.put(`assets/${name}`, request.body, {
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (!IMAGE_START.test(Buffer.from(bytes.subarray(0, 64)).toString("latin1"))) {
+    return uploadJson({ error: "Not a PNG, JPEG, WebP, GIF or AVIF image" }, 415);
+  }
+  const object = await env.PAGES.put(`assets/${name}`, bytes, {
     onlyIf: { etagDoesNotMatch: "*" },
     httpMetadata: { contentType: `image/${extension}` },
   });
   if (!object) return uploadJson({ error: "Upload URL already used" }, 409);
+  await trackUpload(env, `assets/${name}`);
   return uploadJson({ url: `${publicBase(request, env)}/a/${name}` }, 201);
 }
 
@@ -102,16 +117,13 @@ export async function serveAsset(
   env: Env,
   name: string,
 ): Promise<Response> {
-  if (!ASSET_NAME.test(name)) {
-    return new Response("Not found", { status: 404, headers: ASSET_HEADERS });
-  }
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response(null, {
       status: 405,
       headers: { ...ASSET_HEADERS, allow: "GET, HEAD" },
     });
   }
-  const object = await env.PAGES.get(`assets/${name}`);
+  const object = ASSET_NAME.test(name) ? await env.PAGES.get(`assets/${name}`) : null;
   if (!object) return new Response("Not found", { status: 404, headers: ASSET_HEADERS });
   return objectResponse(request, object, {
     ...ASSET_HEADERS,
@@ -121,9 +133,25 @@ export async function serveAsset(
 
 // Storage keys of the images a page embeds. Any mention of an image's name
 // counts, so a link survives however the HTML escapes its slashes; a stray
-// mention only keeps an image longer.
+// mention only keeps an image longer. Names are found from the extension
+// backwards, which stays quick on a page full of hex.
 export function assetKeys(html: string): string[] {
-  return [
-    ...new Set(Array.from(html.matchAll(ASSET_MENTION), (match) => `assets/${match[0]}`)),
-  ];
+  const keys = new Set<string>();
+  for (const match of html.matchAll(ASSET_TYPE)) {
+    const id = html.slice(Math.max(0, match.index - 32), match.index);
+    if (ASSET_ID.test(id)) keys.add(`assets/${id}${match[0]}`);
+  }
+  return [...keys];
+}
+
+// The /a/ images a page links to that are not in the bucket: never uploaded,
+// or deleted for want of a page. Empty when the check itself fails.
+// ponytail: checks the first 50 links; a page with more gets a partial answer.
+export async function missingAssets(bucket: R2Bucket, html: string): Promise<string[]> {
+  const links = Array.from(html.matchAll(ASSET_LINK), (match) => match[1] ?? "");
+  const names = [...new Set(links)].slice(0, 50);
+  const found = await Promise.all(
+    names.map((name) => bucket.head(`assets/${name}`)),
+  ).catch(() => []);
+  return names.filter((_, index) => found[index] === null);
 }

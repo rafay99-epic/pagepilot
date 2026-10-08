@@ -22,9 +22,13 @@ export async function servePage(
   const object = await findPage(env.PAGES, id, (key) => env.PAGES.get(key));
   if (!object)
     return new Response("Not found", { status: 404, headers: SECURITY_HEADERS });
+  const { protocol, origin } = new URL(request.url);
   return objectResponse(request, object, {
     ...SECURITY_HEADERS,
-    "content-security-policy": pageCsp(frameAncestors, new URL(request.url).origin),
+    "content-security-policy": pageCsp(
+      frameAncestors,
+      protocol === "http:" ? origin : "",
+    ),
     "content-type": "text/html; charset=utf-8",
   });
 }

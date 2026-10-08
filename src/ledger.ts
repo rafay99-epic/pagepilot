@@ -68,21 +68,26 @@ export class Ledger extends DurableObject<Env> {
   // so calls arriving out of order only keep an image longer. An image no
   // page embeds any more is deleted a day later, by alarm().
   async settle(page: string, held: number): Promise<void> {
-    const sql = this.ctx.storage.sql;
-    const dropped = sql
+    const dropped = this.ctx.storage.sql
       .exec<{
         asset: string;
       }>("DELETE FROM embeds WHERE page = ? AND held < ? RETURNING asset", page, held)
       .toArray();
-    for (const { asset } of dropped) {
-      sql.exec(
+    await this.release(dropped.map((row) => row.asset));
+  }
+
+  // Starts the day-long countdown for images no page embeds: the ones a page
+  // let go of, and a fresh upload until a page picks it up.
+  async release(assets: string[]): Promise<void> {
+    for (const asset of assets) {
+      this.ctx.storage.sql.exec(
         "INSERT OR IGNORE INTO released (asset, at) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM embeds WHERE asset = ?)",
         asset,
         Date.now(),
         asset,
       );
     }
-    if (dropped.length > 0 && (await this.ctx.storage.getAlarm()) === null) {
+    if (assets.length > 0 && (await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(Date.now() + GRACE_MS);
     }
   }
@@ -124,44 +129,45 @@ function ledger(env: Env) {
   return env.LEDGER?.get(env.LEDGER.idFromName("ledger"));
 }
 
-// Step one of writing a page; see Ledger.hold. Throws when the page embeds
-// images and they cannot be recorded, because a later cleanup could then
-// delete them from under it. Without a ledger nothing is ever cleaned up, so
-// there is nothing to record and the marker is undefined.
+// Step one of writing a page; see Ledger.hold. Rejects when the ledger fails,
+// and a page whose new HTML embeds images must not be written then: a later
+// cleanup could delete them from under it. Without a ledger nothing is ever
+// cleaned up, so there is nothing to record and the marker is undefined.
 export async function holdAssets(
   env: Env,
   page: string,
   assets: string[],
 ): Promise<number | undefined> {
+  return ledger(env)?.hold(page, assets);
+}
+
+// Everything below is bookkeeping, so a page must still load, update and
+// delete when the ledger is missing, failing or stalled. A missed call only
+// keeps an image longer than it had to be, or leaves a view uncounted.
+// ponytail: a stalled call is given 3 seconds, then the caller moves on.
+export async function quietly<T>(call: () => T): Promise<Awaited<T> | undefined> {
   try {
-    return await ledger(env)?.hold(page, assets);
-  } catch (error) {
-    if (assets.length > 0) throw error;
+    const late = new Promise<undefined>((resolve) => setTimeout(resolve, 3000));
+    return await Promise.race([call(), late]);
+  } catch {
     return undefined;
   }
 }
 
-// Everything below is best effort. It is bookkeeping, so a page must still
-// load, update and delete when the ledger is missing or failing. A missed
-// call only keeps an image longer than it had to be.
-
 export async function settleAssets(env: Env, page: string, held: number): Promise<void> {
-  await ledger(env)
-    ?.settle(page, held)
-    .catch(() => undefined);
+  await quietly(() => ledger(env)?.settle(page, held));
 }
 
 export async function forgetPage(env: Env, page: string): Promise<void> {
-  await ledger(env)
-    ?.forget(page)
-    .catch(() => undefined);
+  await quietly(() => ledger(env)?.forget(page));
+}
+
+export async function trackUpload(env: Env, asset: string): Promise<void> {
+  await quietly(() => ledger(env)?.release([asset]));
 }
 
 export async function viewTotals(env: Env): Promise<ViewTotals> {
-  const totals = await ledger(env)
-    ?.totals()
-    .catch(() => undefined);
-  return totals ?? {};
+  return (await quietly(() => ledger(env)?.totals())) ?? {};
 }
 
 // Counts a public page view after the response is on its way. HEAD requests,
@@ -176,5 +182,5 @@ export function countView(
   if (request.method !== "GET") return;
   if (response.status !== 200 && response.status !== 304) return;
   if (BOT.test(request.headers.get("user-agent") ?? "")) return;
-  ctx.waitUntil(Promise.resolve(ledger(env)?.record(id)).catch(() => undefined));
+  ctx.waitUntil(quietly(() => ledger(env)?.record(id)));
 }

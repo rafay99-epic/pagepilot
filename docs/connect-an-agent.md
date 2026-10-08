@@ -43,7 +43,7 @@ file name.
 | ------------------- | ------------------------------ | --------------------------------------------- |
 | `deploy_page`       | `html`, optional `title`       | The page link and a deletion key              |
 | `update_page`       | `id`, `html`, optional `title` | The same link, now serving the new HTML       |
-| `get_page`          | `id`                           | The page's details, then its exact HTML       |
+| `get_page`          | `id`, optional `previous`      | The page's details, then its exact HTML       |
 | `list_pages`        | optional filters, see below    | Pages as JSON, newest update first            |
 | `create_upload_url` | `contentType`                  | A one-use upload URL and the image's link     |
 | `delete_page`       | `id`, `deletionKey`            | A confirmation, or a note the page is missing |
@@ -58,6 +58,11 @@ keep the current one.
 
 To revise a page from an earlier session, call `get_page` first. It returns the stored
 HTML untouched, as its own text block, ready to edit and send back.
+
+An update keeps the version it replaced. `get_page` with `previous: true` returns that
+version, and sending its HTML to `update_page` undoes the update. Send its title too if
+the update renamed the page. One version back is kept, until the next change or until
+the page is deleted.
 
 ## Find a page
 
@@ -89,16 +94,18 @@ shell instead:
    curl -T shot.png "<upload URL>"
    ```
 
-3. Put the returned image link in the page as `<img src="...">`.
+3. Put the returned image link in the page as `<img src="...">`. Keep the file name whole:
+   PagePilot finds a page's images by their names in the HTML.
 
 The upload URL works once and expires in 10 minutes. It carries its own signature, so
 the shell never needs the API key. PNG, JPEG, WebP, GIF and AVIF are accepted, up to
-10 MB each.
+10 MB each. A file that is not one of those is refused.
 
-An image lives as long as some page embeds it. When the last page that embeds it is
-deleted, or updated to drop it, the image is kept one more day and then deleted. Publish
-or update a page with it inside that day and it stays. An image that was uploaded and
-never embedded stays until you remove it from the bucket.
+An image lives as long as some page embeds it, counting the earlier version an update
+keeps. Once nothing embeds it, it is kept one more day and then deleted. Publish or update
+a page with it inside that day and it stays. An image that was uploaded and never
+embedded goes the same way, a day after the upload. When a page links an image that is
+not there, the reply to `deploy_page` or `update_page` names it.
 
 ## Deletion keys
 

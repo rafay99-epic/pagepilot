@@ -4,8 +4,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { PAGE_ID } from "../shared/api";
-import { ASSET_TYPES, assetKeys, createUpload } from "./assets";
-import { holdAssets, settleAssets } from "./ledger";
+import { ASSET_TYPES, assetKeys, createUpload, missingAssets } from "./assets";
+import { forgetPage, holdAssets, quietly, settleAssets } from "./ledger";
 import type { Env } from "./env";
 import { errorResponse, publicBase } from "./http";
 import type { Json } from "./http";
@@ -28,6 +28,20 @@ function text(...blocks: string[]) {
 
 function isObject(value: Json | undefined): value is { [key: string]: Json } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// The stored HTML exactly as it was sent. R2's own text() drops a leading BOM.
+async function exactText(object: R2ObjectBody): Promise<string> {
+  return Buffer.from(await object.arrayBuffer()).toString();
+}
+
+// A line for a tool reply naming linked images that are not in the bucket, so
+// the agent hears about a broken image when it publishes, not never.
+async function imageNote(env: Env, html: string): Promise<string> {
+  const missing = await missingAssets(env.PAGES, html);
+  return missing.length > 0
+    ? `\nNot uploaded, so these images will not show: ${missing.join(", ")}`
+    : "";
 }
 
 function failure(message: string) {
@@ -88,13 +102,15 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
     return errorResponse(400, "Invalid JSON");
   }
   // A call without arguments means none, which list_pages accepts. The SDK
-  // would reject it, so the empty object is filled in here.
-  if (
-    isObject(parsedBody) &&
-    parsedBody["method"] === "tools/call" &&
-    isObject(parsedBody["params"])
-  ) {
-    parsedBody["params"]["arguments"] ??= {};
+  // would reject it, so the empty object is filled in here, batch or not.
+  for (const message of Array.isArray(parsedBody) ? parsedBody : [parsedBody]) {
+    if (
+      isObject(message) &&
+      message["method"] === "tools/call" &&
+      isObject(message["params"])
+    ) {
+      message["params"]["arguments"] ??= {};
+    }
   }
 
   const base = publicBase(request, env);
@@ -130,9 +146,11 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
         });
         if (!object) return failure("Could not publish page; retry");
         return text(
-          `Published "${label}"\n${base}/p/${id}\nDeletion key (store it; shown once): ${deletionKey}`,
+          `Published "${label}"\n${base}/p/${id}\nDeletion key (store it; shown once): ${deletionKey}${await imageNote(env, html)}`,
         );
       } catch {
+        // Lets go of images recorded for a page that was never written.
+        await forgetPage(env, id);
         return failure("Storage unavailable; could not publish page");
       }
     },
@@ -141,7 +159,7 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
     "update_page",
     {
       description:
-        "Replace the HTML of an existing page. The link stays the same. Pass title to rename it. An uploaded image no page embeds any more is deleted a day later. Maximum 900,000 UTF-8 bytes.",
+        "Replace the HTML of an existing page. The link stays the same. Pass title to rename it. The version it replaces is kept and get_page returns it with previous: true. An uploaded image no page embeds any more is deleted a day later. Maximum 900,000 UTF-8 bytes.",
       inputSchema: {
         id: z.string().regex(PAGE_ID),
         html: z.string().min(1).max(MAX_HTML_BYTES),
@@ -153,26 +171,40 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
         return failure("HTML exceeds the 900 KB limit");
       }
       try {
-        const existing = await findPage(env.PAGES, id, (key) => env.PAGES.head(key));
+        const existing = await findPage(env.PAGES, id, (key) => env.PAGES.get(key));
         const record = existing && pageRecord(existing, base);
         if (!existing || !record) return failure(`No page with id ${id}.`);
         const label = title?.trim() || record.title;
-        const deletionKeyHash = existing.customMetadata?.["deletionKeyHash"];
         const key = `pages/${id}.html`;
-        const held = await holdAssets(env, id, assetKeys(html));
+        // Compared, and written, as bytes: decoding would drop a leading BOM,
+        // and the same HTML sent twice would then count as a change.
+        const replaced = Buffer.from(await existing.arrayBuffer());
+        const next = Buffer.from(html);
+        const changed = !replaced.equals(next);
+        // The replaced version is kept, so its images are held along with the
+        // new ones. Why a failure refuses the write: see holdAssets.
+        const embedded = assetKeys(html);
+        const held = changed
+          ? await holdAssets(env, id, [
+              ...new Set([...embedded, ...assetKeys(replaced.toString())]),
+            ]).catch((error: unknown) => {
+              if (embedded.length > 0) throw error;
+              return undefined;
+            })
+          : undefined;
         // Lose a race rather than overwrite blindly: the page must still be
         // the one just read. A legacy page keeps its title in the key, so its
         // first update moves it to the current key, which must be free.
-        const written = await env.PAGES.put(key, html, {
+        const written = await env.PAGES.put(key, next, {
           onlyIf:
             existing.key === key
               ? { etagMatches: existing.etag }
               : { etagDoesNotMatch: "*" },
           httpMetadata: HTML_METADATA,
           customMetadata: {
+            ...existing.customMetadata,
             title: label,
             createdAt: record.createdAt,
-            ...(deletionKeyHash ? { deletionKeyHash } : {}),
           },
         });
         if (!written) {
@@ -180,11 +212,31 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
         }
         // The new HTML is live. What follows is cleanup, so a failure only
         // keeps something longer: the legacy object this page may have moved
-        // from, and the images it no longer embeds.
+        // from, and the images neither version embeds. Those are let go only
+        // once the replaced version is stored, since the version stored
+        // before it may still embed them. `replacedBy` ties the stored copy
+        // to the live version, so get_page never hands out one that a failed
+        // or late write, or a deleted page, left behind.
         const legacy = await legacyKey(env.PAGES, id).catch(() => undefined);
         if (legacy) await env.PAGES.delete(legacy).catch(() => undefined);
-        if (held !== undefined) await settleAssets(env, id, held);
-        return text(`Updated "${label}"\n${base}/p/${id}`);
+        let note = "";
+        if (changed) {
+          const kept = await env.PAGES.put(`previous/${id}.html`, replaced, {
+            customMetadata: { title: record.title, replacedBy: written.etag },
+          }).catch(() => null);
+          if (kept && held !== undefined) await settleAssets(env, id, held);
+          if (!kept) note = "\nThe replaced version could not be kept.";
+          // A delete that landed in the meantime could not know about the copy
+          // just stored, or the images just held, so they go now.
+          const live = await env.PAGES.head(key).catch(() => undefined);
+          if (live === null) {
+            await env.PAGES.delete(`previous/${id}.html`).catch(() => undefined);
+            await forgetPage(env, id);
+          }
+        }
+        return text(
+          `Updated "${label}"\n${base}/p/${id}${note}${await imageNote(env, html)}`,
+        );
       } catch {
         return failure("Storage unavailable; could not update page");
       }
@@ -194,15 +246,35 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
     "get_page",
     {
       description:
-        "Read a page back: its details as JSON, then the exact HTML as a second text block. A page can be up to 900 KB; list_pages shows bytes.",
-      inputSchema: { id: z.string().regex(PAGE_ID) },
+        "Read a page back: its details as JSON, then the exact HTML as a second text block. Pass previous: true for the version the last update replaced; send that HTML, and that title if the update renamed the page, to update_page to undo the update. A page can be up to 900 KB; list_pages shows bytes.",
+      inputSchema: {
+        id: z.string().regex(PAGE_ID),
+        previous: z.boolean().optional(),
+      },
     },
-    async ({ id }) => {
+    async ({ id, previous }) => {
       try {
+        if (previous) {
+          const live = await findPage(env.PAGES, id, (key) => env.PAGES.head(key));
+          const kept = live && (await env.PAGES.get(`previous/${id}.html`));
+          if (!kept || kept.customMetadata?.["replacedBy"] !== live.etag) {
+            await kept?.body.cancel();
+            return failure(`No earlier version of ${id}.`);
+          }
+          return text(
+            JSON.stringify({
+              id,
+              title: kept.customMetadata["title"] ?? id,
+              replacedAt: kept.uploaded.toISOString(),
+              bytes: kept.size,
+            }),
+            await exactText(kept),
+          );
+        }
         const object = await findPage(env.PAGES, id, (key) => env.PAGES.get(key));
         const record = object && pageRecord(object, base);
         if (!object || !record) return failure(`No page with id ${id}.`);
-        return text(JSON.stringify(record), await object.text());
+        return text(JSON.stringify(record), await exactText(object));
       } catch {
         return failure("Storage unavailable; could not read page");
       }
@@ -218,9 +290,7 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
     async (filter) => {
       // Every call scans the whole vault, so this one tool is rate limited.
       // A limiter that is missing or failing lets the call through.
-      const outcome = await env.LIST_LIMITER?.limit({ key: "list_pages" }).catch(
-        () => undefined,
-      );
+      const outcome = await quietly(() => env.LIST_LIMITER?.limit({ key: "list_pages" }));
       if (outcome?.success === false) {
         return failure("Rate limit reached for list_pages; retry in a minute");
       }
@@ -235,13 +305,13 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
     "create_upload_url",
     {
       description:
-        "Get a one-use URL for uploading an image from the shell with curl, plus the URL to embed in a page. PNG, JPEG, WebP, GIF or AVIF, up to 10 MB. Use this instead of inlining base64.",
+        "Get a one-use URL for uploading an image from the shell with curl, plus the URL to embed in a page. PNG, JPEG, WebP, GIF or AVIF, up to 10 MB. Use this instead of inlining base64. An image no page embeds within a day is deleted.",
       inputSchema: { contentType: z.enum(ASSET_TYPES) },
     },
     ({ contentType }) => {
       const { uploadUrl, assetUrl } = createUpload(apiKey, base, contentType);
       return text(
-        `Upload the file:\ncurl -T <file> "${uploadUrl}"\nThen embed: ${assetUrl}\nThe upload URL works once and expires in 10 minutes.`,
+        `Upload the file:\ncurl -T <file> "${uploadUrl}"\nThen embed: ${assetUrl}\nThe upload URL works once and expires in 10 minutes. Put the image in a page within a day, or it is deleted.`,
       );
     },
   );
@@ -249,7 +319,7 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
     "delete_page",
     {
       description:
-        "Permanently delete a page. Uploaded images only it embeds are deleted a day later. Requires the deletion key returned at upload. Pages without a deletion key can only be deleted from the owner dashboard.",
+        "Permanently delete a page and its kept earlier version. Uploaded images only it embeds are deleted a day later. Requires the deletion key returned at upload. Pages without a deletion key can only be deleted from the owner dashboard.",
       inputSchema: {
         id: z.string().regex(PAGE_ID),
         deletionKey: z.string().min(1).max(256),
@@ -271,7 +341,7 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
         if (a.length !== b.length || !timingSafeEqual(a, b)) {
           return failure("Deletion key is incorrect.");
         }
-        await removePage(env, id, object.key);
+        await removePage(env, id);
         return text(`Deleted ${id}.`);
       } catch {
         return failure("Storage unavailable; could not delete page");

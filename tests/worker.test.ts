@@ -264,11 +264,18 @@ test("publish, list without arguments, stream, conditional GET, HEAD and delete"
   assert.ok(
     !response.headers.get("content-security-policy")?.includes("allow-same-origin"),
   );
-  // The page's own origin is allowed for images, so uploads load over HTTP too.
+  // Over plain HTTP, as in local runs, the page's own origin is allowed for
+  // images so uploads load. Over HTTPS the policy is the one pages always had.
   assert.match(
     response.headers.get("content-security-policy") ?? "",
-    /img-src data: blob: https: https:\/\/pagepilot\.test;/,
+    /img-src data: blob: https:;/,
   );
+  const local = await mf.dispatchFetch(url.replace("https://", "http://"));
+  assert.match(
+    local.headers.get("content-security-policy") ?? "",
+    /img-src data: blob: https: http:\/\/pagepilot\.test;/,
+  );
+  await local.body?.cancel();
   const etag = response.headers.get("etag");
   assert.ok(etag);
   for (const condition of [etag, `W/${etag}`, `"other", W/${etag}`, "*"]) {
@@ -291,6 +298,23 @@ test("publish, list without arguments, stream, conditional GET, HEAD and delete"
   const replay = await callTool("delete_page", { id, deletionKey });
   assert.ok(!replay.isError);
   assert.match(replay.text, /No page with id/);
+
+  // A batch is answered too, and a call in it may leave its arguments out.
+  const batch = await mf.dispatchFetch(`${base}/api/mcp`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify([
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_pages" } },
+    ]),
+  });
+  // The SDK answers a batch of one with a single object.
+  const answers: unknown = await batch.json();
+  const answer = resultSchema.parse(Array.isArray(answers) ? answers[0] : answers);
+  assert.ok(!answer.result.isError);
 });
 
 test("legacy title-in-key pages retain links, listing and deletion", async () => {
@@ -427,28 +451,29 @@ test("update_page moves a legacy page to the current key and keeps its link", as
   await bucket.delete(`pages/${id}.html`);
 });
 
-test("an image uploads once, is served safely and outlives its last page by a day", async () => {
-  async function grant() {
-    const { text } = await callTool("create_upload_url", { contentType: "image/png" });
-    const uploadUrl = /curl -T <file> "([^"]+)"/.exec(text)?.[1];
-    const assetUrl = /Then embed: (\S+)/.exec(text)?.[1];
-    assert.ok(uploadUrl && assetUrl);
-    return { uploadUrl, assetUrl };
-  }
-  const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
-  // curl sends a Content-Length; dispatchFetch would send the body chunked.
-  const put = (url: string, body = png) =>
-    mf.dispatchFetch(url, {
-      method: "PUT",
-      body,
-      headers: { "content-length": String(body.byteLength) },
-    });
-  const status = async (url: string) => {
-    const response = await mf.dispatchFetch(url);
-    await response.body?.cancel();
-    return response.status;
-  };
+async function grant() {
+  const { text } = await callTool("create_upload_url", { contentType: "image/png" });
+  const uploadUrl = /curl -T <file> "([^"]+)"/.exec(text)?.[1];
+  const assetUrl = /Then embed: (\S+)/.exec(text)?.[1];
+  assert.ok(uploadUrl && assetUrl);
+  return { uploadUrl, assetUrl };
+}
+// The PNG signature and a few bytes of body.
+const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+// curl sends a Content-Length; dispatchFetch would send the body chunked.
+const put = (url: string, body = png) =>
+  mf.dispatchFetch(url, {
+    method: "PUT",
+    body,
+    headers: { "content-length": String(body.byteLength) },
+  });
+const status = async (url: string) => {
+  const response = await mf.dispatchFetch(url);
+  await response.body?.cancel();
+  return response.status;
+};
 
+test("an image uploads once, is served safely and outlives its last page by a day", async () => {
   const first = await grant();
   assert.equal((await put(first.uploadUrl.replace("expires=", "expires=1"))).status, 403);
   const name = new URL(first.uploadUrl).pathname.split("/").at(-1);
@@ -463,6 +488,9 @@ test("an image uploads once, is served safely and outlives its last page by a da
   assert.equal((await put(first.uploadUrl, new Uint8Array(10_000_001))).status, 413);
   assert.equal((await mf.dispatchFetch(first.uploadUrl, { method: "POST" })).status, 405);
   assert.equal(await status(first.assetUrl), 404);
+  // A file that is not an image is refused and does not use the URL up.
+  const html = new TextEncoder().encode("<script>alert(1)</script>");
+  assert.equal((await put(first.uploadUrl, html)).status, 415);
 
   assert.equal((await put(first.uploadUrl)).status, 201);
   assert.equal((await put(first.uploadUrl)).status, 409);
@@ -499,9 +527,60 @@ test("an image uploads once, is served safely and outlives its last page by a da
 
   await callTool("delete_page", { id: revived.id, deletionKey: revived.deletionKey });
   await callTool("delete_page", { id: report.id, deletionKey: report.deletionKey });
+  const unused = await grant();
+  assert.equal((await put(unused.uploadUrl)).status, 201);
   await sweepImages();
   assert.equal(await status(first.assetUrl), 404, "deleted after its last page");
   assert.equal(await status(second.assetUrl), 404, "deleted after its page");
+  assert.equal(await status(unused.assetUrl), 404, "never embedded");
+
+  // Publishing a page that links a deleted image says so.
+  const broken = await callTool("deploy_page", { html: `<img src="${first.assetUrl}">` });
+  assert.ok(broken.text.endsWith(`will not show: ${first.assetUrl.split("/").at(-1)}`));
+  await callTool("delete_page", {
+    id: /\/p\/([a-f0-9]{32})/.exec(broken.text)?.[1] ?? "",
+    deletionKey: deletionKey(broken) ?? "",
+  });
+});
+
+test("update_page keeps the version it replaced, images included, until the next change", async () => {
+  const shot = await grant();
+  assert.equal((await put(shot.uploadUrl)).status, 201);
+  // The leading BOM has to come back, and must not make a resend look new.
+  const v1 = `\uFEFF<h1>v1</h1><img src="${shot.assetUrl}">`;
+  const v2 = "\uFEFF<h1>v2</h1>";
+  const { id, deletionKey } = await publish(v1, "Kept");
+  assert.ok((await callTool("get_page", { id, previous: true })).isError);
+
+  await callTool("update_page", { id, html: v2, title: "Kept, renamed" });
+  const previous = await callTool("get_page", { id, previous: true });
+  assert.equal(previous.blocks[1], v1);
+  assert.equal(
+    z.object({ title: z.string() }).parse(JSON.parse(previous.text)).title,
+    "Kept",
+  );
+  await sweepImages();
+  assert.equal(await status(shot.assetUrl), 200, "the kept version still embeds it");
+
+  // Sending the same HTML again changes nothing worth keeping.
+  await callTool("update_page", { id, html: v2 });
+  assert.equal((await callTool("get_page", { id })).blocks[1], v2);
+  assert.equal((await callTool("get_page", { id, previous: true })).blocks[1], v1);
+
+  // A copy left over from some other version is not handed out as this one's.
+  const bucket = await mf.getR2Bucket("PAGES");
+  await bucket.put(`previous/${id}.html`, "<h1>stale</h1>", {
+    customMetadata: { replacedBy: "0".repeat(32) },
+  });
+  assert.ok((await callTool("get_page", { id, previous: true })).isError);
+
+  await callTool("update_page", { id, html: "<h1>v3</h1>" });
+  assert.equal((await callTool("get_page", { id, previous: true })).blocks[1], v2);
+  await sweepImages();
+  assert.equal(await status(shot.assetUrl), 404, "neither version embeds it");
+
+  await callTool("delete_page", { id, deletionKey });
+  assert.equal(await bucket.head(`previous/${id}.html`), null);
 });
 
 test("a failing ledger refuses pages with images and nothing else", async () => {

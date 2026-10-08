@@ -22,12 +22,13 @@ Everything else is a 404.
 
 Each page is one object in the bucket, `pages/<32-hex-id>.html`. The title, the hash of
 the deletion key and, once a page has been updated, its first publish time sit in the
-object's metadata. There is no index file.
+object's metadata. There is no index file. The version a page had before its last
+update is kept beside it as `previous/<id>.html` and is deleted with the page.
 
 An uploaded image is one object too, `assets/<32-hex-id>.<type>`. Two things live outside
 R2, in one Durable Object: view counts, as one row per page per day, and the record of
 which page embeds which image. It stores nothing about who viewed a page. An image no
-page embeds any more is deleted from the bucket a day later.
+page embeds, counting the kept earlier version, is deleted from the bucket a day later.
 
 Pages from before the Worker rewrite use `pages/<12-hex-id>~<base64url-title>.html`.
 PagePilot still reads, lists and deletes them, so old links keep working and nothing
@@ -41,18 +42,6 @@ The dashboard's storage view adds up object sizes against R2's 10 GB free tier. 
 report makes at most 200 list calls, enough for 20,000 objects or more, and marks itself
 partial past that. `list_pages` and the dashboard's page list read the vault the same
 way and share that ceiling.
-
-## Limits
-
-| What                 | Limit                   |
-| -------------------- | ----------------------- |
-| Page HTML            | 900,000 bytes           |
-| Image                | 10 MB                   |
-| Upload URL           | 10 minutes, one use     |
-| `list_pages` results | 20 by default, 100 most |
-| `list_pages` calls   | About 30 a minute       |
-| One vault scan       | 200 list calls          |
-| Image nobody embeds  | Deleted after a day     |
 
 ## Views
 
