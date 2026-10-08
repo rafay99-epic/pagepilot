@@ -1,16 +1,26 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type KeyboardEvent } from "react";
-import type { Page } from "../../shared/api";
+import type { DashboardPage } from "../../shared/api";
 import { listAllPages } from "./api";
-import { shortDate } from "./format";
+import { formatBytes, shortDate } from "./format";
 import { PagePreview } from "./page-preview";
 import { QueryError } from "./query-error";
 
 const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
 
+// Second line of a row: "42 views, last Oct 8, 48 kB".
+function activity({ views, lastViewed, bytes }: DashboardPage): string {
+  const size = formatBytes(bytes);
+  if (views === 0 || !lastViewed) return `Never viewed, ${size}`;
+  // lastViewed is a UTC day. Without an offset it parses as local midnight,
+  // so it shows as that same day in every time zone.
+  const day = shortDate.format(new Date(`${lastViewed}T00:00`));
+  return `${views} ${views === 1 ? "view" : "views"}, last ${day}, ${size}`;
+}
+
 // Pages arrive newest first, so grouping in order keeps months in order too.
-function groupByMonth(pages: Page[]) {
-  const groups = new Map<string, Page[]>();
+function groupByMonth(pages: DashboardPage[]) {
+  const groups = new Map<string, DashboardPage[]>();
   for (const page of pages) {
     const label = monthLabel.format(new Date(page.createdAt));
     groups.set(label, [...(groups.get(label) ?? []), page]);
@@ -25,7 +35,7 @@ export function PagesView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const query = useQuery({ queryKey: ["pages"], queryFn: listAllPages, retry: false });
-  const items = query.data ?? [];
+  const items = query.data?.items ?? [];
   const filtered = items.filter((page) =>
     `${page.title} ${page.id}`.toLowerCase().includes(search.toLowerCase()),
   );
@@ -77,7 +87,10 @@ export function PagesView() {
                         setOpen(true);
                       }}
                     >
-                      <span>{page.title}</span>
+                      <span>
+                        {page.title}
+                        <small>{activity(page)}</small>
+                      </span>
                       <time dateTime={page.createdAt}>
                         {shortDate.format(new Date(page.createdAt))}
                       </time>
@@ -91,6 +104,7 @@ export function PagesView() {
         <footer>
           <span>
             {items.length} {items.length === 1 ? "page" : "pages"}
+            {query.data?.complete === false && ", partial scan"}
           </span>
           <button disabled={query.isFetching} onClick={() => void query.refetch()}>
             Refresh

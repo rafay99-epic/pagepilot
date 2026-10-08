@@ -4,37 +4,55 @@ The details, for when you need them.
 
 ## Routes
 
-| Route              | Who can use it            | What it does                             |
-| ------------------ | ------------------------- | ---------------------------------------- |
-| `POST /api/mcp`    | Agents with the API key   | The MCP endpoint                         |
-| `GET /p/<id>`      | Anyone with the link      | Serves a published page                  |
-| `/dashboard/`      | The owner, through Access | The dashboard                            |
-| `/api/dashboard/*` | The owner, through Access | List, preview, delete and storage report |
-| `GET /`            | Anyone                    | Landing page                             |
-| `GET /health`      | Anyone                    | Returns `ok`. Does not check storage     |
-| `GET /robots.txt`  | Anyone                    | Tells crawlers to stay out               |
+| Route                    | Who can use it                  | What it does                             |
+| ------------------------ | ------------------------------- | ---------------------------------------- |
+| `POST /api/mcp`          | Agents with the API key         | The MCP endpoint                         |
+| `GET /p/<id>`            | Anyone with the link            | Serves a published page                  |
+| `GET /a/<name>`          | Anyone with the link            | Serves an uploaded image                 |
+| `PUT /api/assets/<name>` | Anyone with a signed upload URL | Stores one image, once                   |
+| `/dashboard/`            | The owner, through Access       | The dashboard                            |
+| `/api/dashboard/*`       | The owner, through Access       | List, preview, delete and storage report |
+| `GET /`                  | Anyone                          | Landing page                             |
+| `GET /health`            | Anyone                          | Returns `ok`. Does not check storage     |
+| `GET /robots.txt`        | Anyone                          | Tells crawlers to stay out               |
 
 Everything else is a 404.
 
 ## Storage
 
-Each page is one object in the bucket, `pages/<32-hex-id>.html`. The title and the hash of
-the deletion key sit in the object's metadata. There is no index file and no database.
+Each page is one object in the bucket, `pages/<32-hex-id>.html`. The title, the hash of
+the deletion key and, once a page has been updated, its first publish time sit in the
+object's metadata. There is no index file. The version a page had before its last
+update is kept beside it as `previous/<id>.html` and is deleted with the page.
+
+An uploaded image is one object too, `assets/<32-hex-id>.<type>`. Two things live outside
+R2, in one Durable Object: view counts, as one row per page per day, and the record of
+which page embeds which image. It stores nothing about who viewed a page. An image no
+page embeds, counting the kept earlier version, is deleted from the bucket a day later.
 
 Pages from before the Worker rewrite use `pages/<12-hex-id>~<base64url-title>.html`.
 PagePilot still reads, lists and deletes them, so old links keep working and nothing
-needs migrating.
+needs migrating. The first `update_page` on one moves it to the current format without
+changing its link.
 
 Old links depend on the original bucket. Point the Worker at an empty bucket and every
 old page looks missing.
 
 The dashboard's storage view adds up object sizes against R2's 10 GB free tier. One
-report reads at most 20,000 objects and marks itself partial past that.
+report makes at most 200 list calls, enough for 20,000 objects or more, and marks itself
+partial past that. `list_pages` and the dashboard's page list read the vault the same
+way and share that ceiling.
+
+## Views
+
+A view is a `GET` on `/p/<id>` that finds the page. `HEAD` requests, missing pages, the
+dashboard preview and link unfurlers such as Slack and Discord are not counted. Only
+the dashboard sees the numbers.
 
 ## Privacy
 
 A page is as private as its link. The id is 128 bits, so nobody finds a page by guessing.
-Whoever gets a link can still read it and forward it.
+Whoever gets a link can still read it and forward it. Images follow the same rule.
 
 - **Sandboxed.** Pages are served with a sandbox CSP, `no-referrer` and `nosniff`.
   Scripts and HTTPS assets still run inside the sandbox.
@@ -53,7 +71,9 @@ Do not publish secrets. If a page should stop being readable, delete it.
 ```
 src/              The Worker
   index.ts        Router
-  mcp.ts          MCP endpoint and the three tools
+  mcp.ts          MCP endpoint and its tools
+  assets.ts       Image uploads and /a/<name>
+  ledger.ts       View counts and image references, a Durable Object
   dashboard.ts    Owner-only dashboard routes
   access.ts       Cloudflare Access token check
   serve-page.ts   Serves /p/<id>

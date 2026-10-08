@@ -2,30 +2,29 @@
 // contract drift between the Worker and this dashboard fails loudly here
 // instead of surfacing as a silent rendering bug.
 import { z } from "zod";
-import type { Page } from "../../shared/api";
-import { pageListSchema, pageSchema, storageReportSchema } from "../../shared/api";
+import {
+  dashboardPageSchema,
+  pageListSchema,
+  storageReportSchema,
+} from "../../shared/api";
 
 export const SESSION_EXPIRED = "session-expired";
 
 // The Worker only ever serves pages under this origin; refuse anything else
 // before a URL reaches an iframe src or an "Open" link.
-const sameOriginPage = pageSchema.extend({
-  url: pageSchema.shape.url.refine(
-    (url) => new URL(url).origin === window.location.origin,
-    "Page URL is not same-origin.",
-  ),
-});
+const sameOriginUrl = dashboardPageSchema.shape.url.refine(
+  (url) => new URL(url).origin === window.location.origin,
+  "Page URL is not same-origin.",
+);
 
 const pageListWithOrigin = pageListSchema.extend({
-  items: z.array(sameOriginPage),
-});
-
-const largestPageWithOrigin = sameOriginPage.extend({
-  bytes: storageReportSchema.shape.largest.element.shape.bytes,
+  items: z.array(dashboardPageSchema.extend({ url: sameOriginUrl })),
 });
 
 const storageReportWithOrigin = storageReportSchema.extend({
-  largest: z.array(largestPageWithOrigin).max(10),
+  largest: z
+    .array(storageReportSchema.shape.largest.element.extend({ url: sameOriginUrl }))
+    .max(10),
 });
 
 // 401/403/503 mean the same thing on every dashboard route, so the status
@@ -50,24 +49,17 @@ async function fetchDashboard(
   return response;
 }
 
-// Every page, newest first. The Worker lists in key order, and keys are random
-// ids, so a sensible order needs the full set.
-// ponytail: loads the whole vault up front, 100 pages per request. Fine into
-// the low thousands; past that, keep a date-sorted index on write and page it.
+// Every page, newest first by publish date. The Worker sends the whole vault
+// in one response, ordered by last update; the list groups by month created.
 export async function listAllPages() {
-  const items: Page[] = [];
-  let cursor = "";
-  do {
-    const response = await fetchDashboard(
-      `/api/dashboard/pages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
-      {},
-      "Could not load pages.",
-    );
-    const batch = pageListWithOrigin.parse(await response.json());
-    items.push(...batch.items);
-    cursor = batch.nextCursor ?? "";
-  } while (cursor);
-  return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const response = await fetchDashboard(
+    "/api/dashboard/pages",
+    {},
+    "Could not load pages.",
+  );
+  const list = pageListWithOrigin.parse(await response.json());
+  list.items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return list;
 }
 
 export async function deletePage(id: string) {

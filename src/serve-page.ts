@@ -1,6 +1,6 @@
 import { PAGE_ID } from "../shared/api";
 import type { Env } from "./env";
-import { pageCsp, SECURITY_HEADERS } from "./http";
+import { objectResponse, pageCsp, SECURITY_HEADERS } from "./http";
 import { findPage } from "./pages";
 
 // Serves a stored page. Public links refuse framing; the dashboard preview
@@ -22,20 +22,13 @@ export async function servePage(
   const object = await findPage(env.PAGES, id, (key) => env.PAGES.get(key));
   if (!object)
     return new Response("Not found", { status: 404, headers: SECURITY_HEADERS });
-  const headers = {
+  const { protocol, origin } = new URL(request.url);
+  return objectResponse(request, object, {
     ...SECURITY_HEADERS,
-    "content-security-policy": pageCsp(frameAncestors),
+    "content-security-policy": pageCsp(
+      frameAncestors,
+      protocol === "http:" ? origin : "",
+    ),
     "content-type": "text/html; charset=utf-8",
-    etag: object.httpEtag,
-  };
-  const condition = request.headers.get("if-none-match");
-  const matches = condition?.split(",").some((tag) => {
-    const normalized = tag.trim().replace(/^W\//, "");
-    return normalized === "*" || normalized === object.httpEtag;
   });
-  if (matches || request.method === "HEAD") {
-    await object.body.cancel();
-    return new Response(null, { status: matches ? 304 : 200, headers });
-  }
-  return new Response(object.body, { headers });
 }

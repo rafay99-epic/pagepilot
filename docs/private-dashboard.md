@@ -42,8 +42,8 @@ In the Cloudflare dashboard, go to **Zero Trust > Access controls > Applications
    Each path covers everything below it, so the dashboard's assets and API calls are
    included.
 
-Stop there. Do not add `/api/mcp` or `/p/`. Agents and people opening a link cannot pass
-an Access login, so both would break.
+Stop there. Do not add `/api/mcp`, `/api/assets`, `/p/` or `/a/`. Agents, image uploads
+and people opening a link cannot pass an Access login, so all of them would break.
 
 ## 2. Allow only yourself
 

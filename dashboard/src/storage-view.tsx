@@ -1,22 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { getStorage } from "./api";
-import { shortDate } from "./format";
+import { formatBytes, shortDate } from "./format";
 import { QueryError } from "./query-error";
-
-const BYTE_UNITS = ["B", "kB", "MB", "GB"] as const;
-
-// Decimal units (1000 steps), matching the free tier's decimal 10 GB.
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1000 && unitIndex < BYTE_UNITS.length - 1) {
-    value /= 1000;
-    unitIndex += 1;
-  }
-  // toPrecision then Number: three significant digits, no trailing zeros.
-  return `${Number(value.toPrecision(3))} ${BYTE_UNITS[unitIndex] ?? "GB"}`;
-}
 
 function formatPercent(percent: number): string {
   if (percent === 0) return "0%";
@@ -99,6 +84,14 @@ export function StorageView() {
         <div>
           <dt>Pages</dt>
           <dd>{report.pageCount}</dd>
+        </div>
+        <div>
+          <dt>Images</dt>
+          <dd>{report.assetCount}</dd>
+        </div>
+        <div>
+          <dt>Image size</dt>
+          <dd>{formatBytes(report.assetBytes)}</dd>
         </div>
         <div>
           <dt>Objects</dt>
