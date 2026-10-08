@@ -1,8 +1,9 @@
 import { PAGE_ID } from "../shared/api";
 import { authorizeOwner } from "./access";
 import type { Env } from "./env";
-import { dashboardJson } from "./http";
-import { findPage, listPages, publicBase } from "./pages";
+import { dashboardJson, publicBase } from "./http";
+import { viewTotals } from "./ledger";
+import { findPage, removePage, scanPages } from "./pages";
 import { servePage } from "./serve-page";
 import { storageReport } from "./storage";
 
@@ -41,11 +42,12 @@ export async function handleDashboard(request: Request, env: Env): Promise<Respo
       if (request.method !== "GET") {
         return dashboardJson({ error: "Method not allowed" }, 405);
       }
-      const cursor = url.searchParams.get("cursor") ?? undefined;
-      if (cursor && cursor.length > 4096) {
-        return dashboardJson({ error: "Invalid cursor" }, 400);
-      }
-      return dashboardJson(await listPages(env.PAGES, publicBase(request, env), cursor));
+      const [{ pages, complete }, totals] = await Promise.all([
+        scanPages(env.PAGES, publicBase(request, env)),
+        viewTotals(env),
+      ]);
+      const items = pages.map((page) => ({ views: 0, ...page, ...totals[page.id] }));
+      return dashboardJson({ items, complete });
     }
     if (url.pathname === "/api/dashboard/storage") {
       if (request.method !== "GET") {
@@ -63,7 +65,7 @@ export async function handleDashboard(request: Request, env: Env): Promise<Respo
       if (!PAGE_ID.test(id)) return dashboardJson({ error: "Invalid page id" }, 400);
       const object = await findPage(env.PAGES, id, (key) => env.PAGES.head(key));
       if (!object) return dashboardJson({ error: "Page not found" }, 404);
-      await env.PAGES.delete(object.key);
+      await removePage(env, id, object.key);
       return dashboardJson({ id, deleted: true });
     }
     return dashboardJson({ error: "Not found" }, 404);

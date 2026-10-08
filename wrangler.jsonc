@@ -30,6 +30,19 @@
       "bucket_name": "html-slop",
     },
   ],
+  // View counts and which page embeds which image, in one SQLite-backed object.
+  "durable_objects": {
+    "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ledger"] }],
+  // list_pages scans the whole bucket, so it gets 30 calls a minute.
+  "ratelimits": [
+    {
+      "name": "LIST_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 30, "period": 60 },
+    },
+  ],
   "env": {
     "production": {
       "name": "pagepilot",
@@ -66,6 +79,16 @@
         {
           "binding": "PAGES",
           "bucket_name": "html-slop",
+        },
+      ],
+      "durable_objects": {
+        "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }],
+      },
+      "ratelimits": [
+        {
+          "name": "LIST_LIMITER",
+          "namespace_id": "1001",
+          "simple": { "limit": 30, "period": 60 },
         },
       ],
     },

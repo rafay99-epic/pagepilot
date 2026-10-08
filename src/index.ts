@@ -1,12 +1,16 @@
+import { handleUpload, serveAsset } from "./assets";
 import { handleDashboard } from "./dashboard";
 import type { Env } from "./env";
 import { errorResponse, LANDING_HEADERS, SECURITY_HEADERS } from "./http";
 import landing from "./landing.html";
 import { handleMcp } from "./mcp";
+import { countView } from "./ledger";
 import { servePage } from "./serve-page";
 
+export { Ledger } from "./ledger";
+
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     try {
       if (url.pathname === "/api/mcp") return await handleMcp(request, env);
@@ -19,8 +23,21 @@ export default {
       if (url.pathname.startsWith("/api/dashboard/")) {
         return await handleDashboard(request, env);
       }
+      if (url.pathname.startsWith("/api/assets/")) {
+        return await handleUpload(
+          request,
+          env,
+          url.pathname.slice("/api/assets/".length),
+        );
+      }
+      if (url.pathname.startsWith("/a/")) {
+        return await serveAsset(request, env, url.pathname.slice(3));
+      }
       if (url.pathname.startsWith("/p/")) {
-        return await servePage(request, env, url.pathname.slice(3));
+        const id = url.pathname.slice(3);
+        const response = await servePage(request, env, id);
+        countView(request, response, env, ctx, id);
+        return response;
       }
       if (
         (request.method === "GET" || request.method === "HEAD") &&

@@ -19,9 +19,9 @@ Agents are good at writing HTML and bad at showing it to you. PagePilot fixes th
 part. Your agent sends a page of HTML over MCP, PagePilot stores it in your own private R2
 bucket, and the agent gets a short link back.
 
-One Cloudflare Worker runs all of it. There is no database and no separate login service.
-A private dashboard, guarded by Cloudflare Access, lets you search, preview and delete
-what your agents published.
+One Cloudflare Worker runs all of it. Pages and images live in R2, view counts in a
+Durable Object, and there is no separate login service. A private dashboard, guarded by
+Cloudflare Access, lets you search, preview and delete what your agents published.
 
 ## The route
 
@@ -60,7 +60,7 @@ your first page.
 | [Run locally](docs/run-locally.md)             | Start the Worker on your machine, publish a test page |
 | [Deploy to Cloudflare](docs/deploy.md)         | Bucket, API key, first deploy, your own domain        |
 | [Private dashboard](docs/private-dashboard.md) | Create the Cloudflare Access application and sign in  |
-| [Connect an agent](docs/connect-an-agent.md)   | MCP settings and the three tools                      |
+| [Connect an agent](docs/connect-an-agent.md)   | MCP settings and the six tools                        |
 | [Reference](docs/reference.md)                 | Routes, storage, privacy, project layout              |
 
 ## One thing to know

@@ -6,8 +6,9 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { z } from "zod";
 import { SignJWT } from "jose";
-import { generateKeyPairSync } from "node:crypto";
+import { createHmac, generateKeyPairSync } from "node:crypto";
 import { readdirSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 
 const key = "local-test-key-not-a-production-secret";
 const base = "https://pagepilot.test";
@@ -19,14 +20,26 @@ const workerModules = [
     .filter((name) => name.endsWith(".html"))
     .map((name) => ({ type: "Text" as const, path: `dist/${name}` })),
 ];
+// What every Miniflare instance here starts from.
+const worker = {
+  modules: workerModules,
+  modulesRoot: "dist",
+  compatibilityDate: "2026-09-16",
+  compatibilityFlags: ["nodejs_compat"],
+  r2Buckets: ["PAGES"],
+};
+// The ledger and the list_pages limiter, for instances that use them.
+const stateful = {
+  durableObjects: { LEDGER: { className: "Ledger", useSQLite: true } },
+  ratelimits: {
+    LIST_LIMITER: { namespace_id: "1001", simple: { limit: 1000, period: 60 as const } },
+  },
+};
 const mf = new Miniflare(
   convertV4MiniflareOptions({
-    modules: workerModules,
-    modulesRoot: "dist",
-    compatibilityDate: "2026-09-16",
-    compatibilityFlags: ["nodejs_compat"],
-    r2Buckets: ["PAGES"],
+    ...worker,
     bindings: { PAGEPILOT_API_KEY: key },
+    ...stateful,
   }),
 );
 
@@ -44,8 +57,8 @@ after(async () => {
 // carry as params or tool arguments.
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
-async function rpc(method: string, params?: Json) {
-  const response = await mf.dispatchFetch(`${base}/api/mcp`, {
+async function rpc(method: string, params?: Json, instance = mf) {
+  const response = await instance.dispatchFetch(`${base}/api/mcp`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${key}`,
@@ -66,32 +79,54 @@ const resultSchema = z.object({
   }),
 });
 
-async function callTool(name: string, args?: Json) {
+async function callTool(name: string, args?: Json, instance = mf) {
   const result = resultSchema.parse(
-    await rpc("tools/call", {
-      name,
-      ...(args === undefined ? {} : { arguments: args }),
-    }),
+    await rpc(
+      "tools/call",
+      { name, ...(args === undefined ? {} : { arguments: args }) },
+      instance,
+    ),
   ).result;
-  const text = result.content[0]?.text;
+  const blocks = result.content.map((block) => block.text);
+  const text = blocks[0];
   assert.ok(text);
-  return { text, isError: result.isError };
+  return { text, blocks, isError: result.isError };
 }
 
+const pageSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  url: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  bytes: z.number(),
+});
 const listingSchema = z.object({
-  items: z.array(
-    z.object({
-      id: z.string(),
-      title: z.string(),
-      url: z.string(),
-      createdAt: z.string(),
-    }),
-  ),
+  items: z.array(pageSchema),
   nextCursor: z.string().optional(),
 });
+// Passthrough, so a field the Worker should never send is still visible.
+const dashboardListingSchema = z.object({
+  items: z.array(
+    pageSchema
+      .extend({ views: z.number(), lastViewed: z.string().optional() })
+      .passthrough(),
+  ),
+  complete: z.boolean(),
+});
 
-async function publish(html = "<!doctype html><h1>Hello</h1>", title = "Test") {
-  const result = await callTool("deploy_page", { html, title });
+async function listPages(args?: Json) {
+  const result = await callTool("list_pages", args);
+  assert.ok(!result.isError, result.text);
+  return listingSchema.parse(JSON.parse(result.text));
+}
+
+async function publish(
+  html = "<!doctype html><h1>Hello</h1>",
+  title = "Test",
+  instance = mf,
+) {
+  const result = await callTool("deploy_page", { html, title }, instance);
   assert.ok(!result.isError, result.text);
   const url = result.text.split("\n")[1];
   assert.ok(url);
@@ -102,6 +137,16 @@ async function publish(html = "<!doctype html><h1>Hello</h1>", title = "Test") {
   const dk = deletionKey(result);
   assert.ok(dk);
   return { id, url, deletionKey: dk };
+}
+
+// Runs the ledger's cleanup as if a day had passed since the last release.
+// Miniflare hands back an untyped stub, hence the cast to the one method used.
+async function sweepImages() {
+  const ledgers = await mf.getDurableObjectNamespace("LEDGER");
+  const ledger = ledgers.get(ledgers.idFromName("ledger")) as unknown as {
+    sweep(before: number): Promise<void>;
+  };
+  await ledger.sweep(Date.now() + 1);
 }
 
 test("backend starts; API key protects all MCP methods and origins", async () => {
@@ -148,11 +193,7 @@ test("backend starts; API key protects all MCP methods and origins", async () =>
 test("missing key fails closed", async () => {
   const unconfigured = new Miniflare(
     convertV4MiniflareOptions({
-      modules: workerModules,
-      modulesRoot: "dist",
-      compatibilityDate: "2026-09-16",
-      compatibilityFlags: ["nodejs_compat"],
-      r2Buckets: ["PAGES"],
+      ...worker,
     }),
   );
   try {
@@ -180,9 +221,20 @@ test("official MCP client initializes, discovers and invokes tools", async () =>
     await client.connect(transport);
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+      "create_upload_url",
       "delete_page",
       "deploy_page",
+      "get_page",
       "list_pages",
+      "update_page",
+    ]);
+    const filters = tools.find((tool) => tool.name === "list_pages")?.inputSchema;
+    assert.deepEqual(Object.keys(filters?.properties ?? {}).sort(), [
+      "after",
+      "before",
+      "cursor",
+      "limit",
+      "query",
     ]);
     const listing = await client.callTool({ name: "list_pages" });
     assert.ok(!listing.isError);
@@ -196,7 +248,7 @@ test("publish, list without arguments, stream, conditional GET, HEAD and delete"
   const { id, url, deletionKey } = await publish(html, "Unicode café");
   const bucket = await mf.getR2Bucket("PAGES");
   assert.ok(await bucket.head(`pages/${id}.html`));
-  const listing = listingSchema.parse(JSON.parse((await callTool("list_pages")).text));
+  const listing = await listPages();
   assert.equal(listing.items.find((page) => page.id === id)?.title, "Unicode café");
   const response = await mf.dispatchFetch(url);
   assert.equal(response.status, 200);
@@ -211,6 +263,11 @@ test("publish, list without arguments, stream, conditional GET, HEAD and delete"
   );
   assert.ok(
     !response.headers.get("content-security-policy")?.includes("allow-same-origin"),
+  );
+  // The page's own origin is allowed for images, so uploads load over HTTP too.
+  assert.match(
+    response.headers.get("content-security-policy") ?? "",
+    /img-src data: blob: https: https:\/\/pagepilot\.test;/,
   );
   const etag = response.headers.get("etag");
   assert.ok(etag);
@@ -246,7 +303,7 @@ test("legacy title-in-key pages retain links, listing and deletion", async () =>
     await (await mf.dispatchFetch(`${base}/p/${id}`)).text(),
     "<h1>Old page</h1>",
   );
-  const listing = listingSchema.parse(JSON.parse((await callTool("list_pages")).text));
+  const listing = await listPages();
   assert.equal(listing.items.find((page) => page.id === id)?.title, title);
   const legacyResult = await callTool("delete_page", { id, deletionKey: "irrelevant" });
   assert.ok(legacyResult.isError);
@@ -257,33 +314,236 @@ test("legacy title-in-key pages retain links, listing and deletion", async () =>
   assert.equal((await mf.dispatchFetch(`${base}/p/${id}`)).status, 404);
 });
 
-test("paginated listings expose every page and preserve metadata", async () => {
+test("list_pages walks every page once, newest first, inside a time window", async () => {
   const bucket = await mf.getR2Bucket("PAGES");
-  for (let index = 0; index < 103; index++) {
-    await bucket.put(
-      `pages/${index.toString(16).padStart(32, "0")}.html`,
-      "<p>page</p>",
-      {
-        customMetadata: { title: `Page ${index}` },
-      },
-    );
+  const ids = Array.from({ length: 103 }, (_, index) =>
+    index.toString(16).padStart(32, "0"),
+  );
+  for (const id of ids) {
+    await bucket.put(`pages/${id}.html`, "<p>page</p>", {
+      customMetadata: { title: `Bulk ${id}` },
+    });
   }
-  const first = listingSchema.parse(JSON.parse((await callTool("list_pages")).text));
-  assert.equal(first.items.length, 100);
-  assert.ok(first.nextCursor);
-  const second = listingSchema.parse(
-    JSON.parse((await callTool("list_pages", { cursor: first.nextCursor })).text),
+  const defaults = await listPages();
+  assert.equal(defaults.items.length, 20);
+  assert.ok(defaults.nextCursor);
+
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listPages({
+      query: "bulk",
+      limit: 50,
+      ...(cursor ? { cursor } : {}),
+    });
+    seen.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.deepEqual([...seen].sort(), ids);
+  assert.ok((await callTool("list_pages", { cursor: "not-a-cursor" })).isError);
+  await bucket.delete(ids.map((id) => `pages/${id}.html`));
+
+  const mark = new Date().toISOString();
+  await delay(5);
+  const older = await publish("<p>a</p>", "Window A");
+  await delay(5);
+  const newer = await publish("<p>bb</p>", "Window B");
+  const recent = await listPages({ after: mark });
+  assert.deepEqual(
+    recent.items.map((item) => [item.id, item.bytes]),
+    [
+      [newer.id, 9],
+      [older.id, 8],
+    ],
   );
-  assert.equal(second.items.length, 3);
-  assert.equal(second.nextCursor, undefined);
-  assert.equal(
-    new Set([...first.items, ...second.items].map((page) => page.id)).size,
-    103,
+  assert.equal((await listPages({ before: mark, query: "window" })).items.length, 0);
+  assert.ok((await callTool("list_pages", { after: "yesterday" })).isError);
+  await bucket.delete([`pages/${older.id}.html`, `pages/${newer.id}.html`]);
+});
+
+test("list_pages is rate limited", async () => {
+  const limited = new Miniflare(
+    convertV4MiniflareOptions({
+      ...worker,
+      bindings: { PAGEPILOT_API_KEY: key },
+      ...stateful,
+      ratelimits: {
+        LIST_LIMITER: { namespace_id: "1001", simple: { limit: 2, period: 60 } },
+      },
+    }),
   );
-  assert.equal(first.items[0]?.title, "Page 0");
-  await bucket.delete(
-    [...first.items, ...second.items].map((page) => `pages/${page.id}.html`),
+  try {
+    // Five calls span at most two windows of two, so one has to be refused
+    // even when a window boundary falls in the middle of the run.
+    const results = [];
+    for (let call = 0; call < 5; call++) {
+      results.push(await callTool("list_pages", undefined, limited));
+    }
+    const refused = results.find((result) => result.isError);
+    assert.match(refused?.text ?? "", /Rate limit/);
+  } finally {
+    await limited.dispose();
+  }
+});
+
+test("update_page keeps the link, creation time and deletion key; get_page returns the source", async () => {
+  const { id, url, deletionKey } = await publish("<h1>v1</h1>", "Draft");
+  const original = pageSchema.parse(
+    JSON.parse((await callTool("get_page", { id })).text),
   );
+  assert.equal(original.createdAt, original.updatedAt);
+  await delay(5);
+
+  const updated = await callTool("update_page", { id, html: "<h1>v2 é</h1>" });
+  assert.ok(!updated.isError, updated.text);
+  assert.equal(updated.text.split("\n")[1], url);
+  assert.equal(await (await mf.dispatchFetch(url)).text(), "<h1>v2 é</h1>");
+
+  await callTool("update_page", { id, html: "<h1>v3</h1>", title: "Final" });
+  const read = await callTool("get_page", { id });
+  const record = pageSchema.parse(JSON.parse(read.text));
+  assert.equal(record.title, "Final");
+  assert.equal(record.createdAt, original.createdAt);
+  assert.ok(record.updatedAt > original.updatedAt);
+  assert.equal(read.blocks[1], "<h1>v3</h1>");
+
+  const missing = "f".repeat(32);
+  assert.ok((await callTool("update_page", { id: missing, html: "<p>x</p>" })).isError);
+  assert.ok((await callTool("get_page", { id: missing })).isError);
+  assert.ok(!(await callTool("delete_page", { id, deletionKey })).isError);
+});
+
+test("update_page moves a legacy page to the current key and keeps its link", async () => {
+  const bucket = await mf.getR2Bucket("PAGES");
+  const id = "0a1b2c3d4e5f";
+  const oldKey = `pages/${id}~${Buffer.from("Legacy plan").toString("base64url")}.html`;
+  await bucket.put(oldKey, "<p>old</p>");
+  const updated = await callTool("update_page", { id, html: "<p>new</p>" });
+  assert.ok(!updated.isError, updated.text);
+  assert.equal(await bucket.head(oldKey), null);
+  assert.equal(await (await mf.dispatchFetch(`${base}/p/${id}`)).text(), "<p>new</p>");
+  const record = pageSchema.parse(JSON.parse((await callTool("get_page", { id })).text));
+  assert.equal(record.title, "Legacy plan");
+  await bucket.delete(`pages/${id}.html`);
+});
+
+test("an image uploads once, is served safely and outlives its last page by a day", async () => {
+  async function grant() {
+    const { text } = await callTool("create_upload_url", { contentType: "image/png" });
+    const uploadUrl = /curl -T <file> "([^"]+)"/.exec(text)?.[1];
+    const assetUrl = /Then embed: (\S+)/.exec(text)?.[1];
+    assert.ok(uploadUrl && assetUrl);
+    return { uploadUrl, assetUrl };
+  }
+  const png = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+  // curl sends a Content-Length; dispatchFetch would send the body chunked.
+  const put = (url: string, body = png) =>
+    mf.dispatchFetch(url, {
+      method: "PUT",
+      body,
+      headers: { "content-length": String(body.byteLength) },
+    });
+  const status = async (url: string) => {
+    const response = await mf.dispatchFetch(url);
+    await response.body?.cancel();
+    return response.status;
+  };
+
+  const first = await grant();
+  assert.equal((await put(first.uploadUrl.replace("expires=", "expires=1"))).status, 403);
+  const name = new URL(first.uploadUrl).pathname.split("/").at(-1);
+  const signature = createHmac("sha256", key)
+    .update(`pagepilot-upload-v1\n${name}\n1`)
+    .digest("base64url");
+  const expired = await put(
+    `${base}/api/assets/${name}?expires=1&signature=${signature}`,
+  );
+  assert.equal(expired.status, 403);
+  assert.match(await expired.text(), /expired/);
+  assert.equal((await put(first.uploadUrl, new Uint8Array(10_000_001))).status, 413);
+  assert.equal((await mf.dispatchFetch(first.uploadUrl, { method: "POST" })).status, 405);
+  assert.equal(await status(first.assetUrl), 404);
+
+  assert.equal((await put(first.uploadUrl)).status, 201);
+  assert.equal((await put(first.uploadUrl)).status, 409);
+  const served = await mf.dispatchFetch(first.assetUrl);
+  assert.equal(served.status, 200);
+  assert.deepEqual(new Uint8Array(await served.arrayBuffer()), png);
+  assert.equal(served.headers.get("content-type"), "image/png");
+  assert.equal(served.headers.get("x-content-type-options"), "nosniff");
+  assert.match(served.headers.get("content-security-policy") ?? "", /sandbox/);
+
+  // Two pages embed the first image, one of them with escaped slashes, so it
+  // has to outlive either one alone.
+  const report = await publish(`<img src="${first.assetUrl}">`, "Report");
+  const copy = await publish(
+    `<script>const shot = "${first.assetUrl.replaceAll("/", "\\/")}"</script>`,
+    "Report copy",
+  );
+  const second = await grant();
+  assert.equal((await put(second.uploadUrl)).status, 201);
+  await callTool("update_page", {
+    id: report.id,
+    html: `<img src="${second.assetUrl}">`,
+  });
+  await sweepImages();
+  assert.equal(await status(first.assetUrl), 200, "still embedded by the copy");
+
+  // Nobody embeds the first image now, but a page published within the day
+  // picks it up again.
+  await callTool("delete_page", { id: copy.id, deletionKey: copy.deletionKey });
+  assert.equal(await status(first.assetUrl), 200, "kept for a day");
+  const revived = await publish(`<img src="${first.assetUrl}">`, "Revived");
+  await sweepImages();
+  assert.equal(await status(first.assetUrl), 200, "embedded again");
+
+  await callTool("delete_page", { id: revived.id, deletionKey: revived.deletionKey });
+  await callTool("delete_page", { id: report.id, deletionKey: report.deletionKey });
+  await sweepImages();
+  assert.equal(await status(first.assetUrl), 404, "deleted after its last page");
+  assert.equal(await status(second.assetUrl), 404, "deleted after its page");
+});
+
+test("a failing ledger refuses pages with images and nothing else", async () => {
+  // LEDGER points at a class with no methods, so every ledger call rejects.
+  const failing = new Miniflare(
+    convertV4MiniflareOptions({
+      workers: [
+        {
+          ...worker,
+          name: "pagepilot",
+          bindings: { PAGEPILOT_API_KEY: key },
+          durableObjects: { LEDGER: { className: "Ledger", scriptName: "broken" } },
+        },
+        {
+          name: "broken",
+          modules: true,
+          compatibilityDate: "2026-09-16",
+          durableObjects: { LEDGER: "Ledger" },
+          script:
+            'import { DurableObject } from "cloudflare:workers"; export class Ledger extends DurableObject {} export default { fetch: () => new Response(null) };',
+        },
+      ],
+    }),
+  );
+  try {
+    // Published unrecorded, the image could be deleted from under the page.
+    const image = `<img src="${base}/a/${"a".repeat(32)}.png">`;
+    assert.ok((await callTool("deploy_page", { html: image }, failing)).isError);
+    const bucket = await failing.getR2Bucket("PAGES");
+    assert.equal((await bucket.list()).objects.length, 0);
+
+    const { id, url, deletionKey } = await publish("<p>plain</p>", "Plain", failing);
+    assert.ok((await callTool("update_page", { id, html: image }, failing)).isError);
+    assert.equal(await (await failing.dispatchFetch(url)).text(), "<p>plain</p>");
+    const edited = await callTool("update_page", { id, html: "<p>edited</p>" }, failing);
+    assert.ok(!edited.isError, edited.text);
+    assert.ok(!(await callTool("list_pages", undefined, failing)).isError);
+    const deleted = await callTool("delete_page", { id, deletionKey }, failing);
+    assert.ok(!deleted.isError, deleted.text);
+  } finally {
+    await failing.dispose();
+  }
 });
 
 test("upload validation checks UTF-8 bytes and malformed input", async () => {
@@ -310,35 +570,24 @@ test("upload validation checks UTF-8 bytes and malformed input", async () => {
 test("production canonical URL overrides preview request origin", async () => {
   const production = new Miniflare(
     convertV4MiniflareOptions({
-      modules: workerModules,
-      modulesRoot: "dist",
-      compatibilityDate: "2026-09-16",
-      compatibilityFlags: ["nodejs_compat"],
-      r2Buckets: ["PAGES"],
+      ...worker,
       bindings: { PAGEPILOT_API_KEY: key, PUBLIC_URL: "https://pagepilot.rafay99.com" },
     }),
   );
   try {
-    const response = await production.dispatchFetch(`${base}/api/mcp`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${key}`,
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "deploy_page", arguments: { html: "<p>local test</p>" } },
-      }),
-    });
-    const result = resultSchema.parse(await response.json());
-    assert.ok(!result.result.isError);
-    assert.match(
-      result.result.content[0]?.text ?? "",
-      /https:\/\/pagepilot\.rafay99\.com\/p\/[a-f0-9]{32}/,
+    const result = await callTool(
+      "deploy_page",
+      { html: "<p>local test</p>" },
+      production,
     );
+    assert.ok(!result.isError);
+    const link = /https:\/\/pagepilot\.rafay99\.com(\/p\/[a-f0-9]{32})/.exec(result.text);
+    assert.ok(link?.[1]);
+    // This instance has no ledger and no limiter. Pages still serve and list.
+    const served = await production.dispatchFetch(`${base}${link[1]}`);
+    assert.equal(served.status, 200);
+    await served.body?.cancel();
+    assert.ok(!(await callTool("list_pages", undefined, production)).isError);
   } finally {
     await production.dispose();
   }
@@ -376,17 +625,14 @@ function signAccessJwt(
 
 const accessMf = new Miniflare(
   convertV4MiniflareOptions({
-    modules: workerModules,
-    modulesRoot: "dist",
-    compatibilityDate: "2026-09-16",
-    compatibilityFlags: ["nodejs_compat"],
-    r2Buckets: ["PAGES"],
+    ...worker,
     bindings: {
       PAGEPILOT_API_KEY: key,
       ACCESS_TEAM_DOMAIN: accessDomain,
       ACCESS_AUD: accessAud,
       OWNER_EMAIL: ownerEmail,
     },
+    ...stateful,
     serviceBindings: {
       ASSETS: async (request) => {
         const url = new URL(request.url);
@@ -446,11 +692,7 @@ test("dashboard rejects missing, tampered, expired and mismatched tokens", async
   }
   const wrongKey = await new Miniflare(
     convertV4MiniflareOptions({
-      modules: workerModules,
-      modulesRoot: "dist",
-      compatibilityDate: "2026-09-16",
-      compatibilityFlags: ["nodejs_compat"],
-      r2Buckets: ["PAGES"],
+      ...worker,
       bindings: {
         PAGEPILOT_API_KEY: key,
         ACCESS_TEAM_DOMAIN: "other-team.cloudflareaccess.com",
@@ -484,32 +726,13 @@ test("dashboard assets require owner authentication", async () => {
 
 test("dashboard owner lists and deletes with origin and legacy handling", async () => {
   const bucket = await accessMf.getR2Bucket("PAGES");
-  const deploy = await accessMf.dispatchFetch(`${base}/api/mcp`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${key}`,
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: { name: "deploy_page", arguments: { html: "<p>dash</p>", title: "Dash" } },
-    }),
-  });
-  const deployResult = resultSchema.parse(await deploy.json()).result;
-  assert.ok(!deployResult.isError);
-  const deployed = deployResult.content[0]?.text.split("\n")[1];
-  assert.ok(deployed);
-  const id = deployed.split("/").at(-1);
-  assert.ok(id);
+  const { id } = await publish("<p>dash</p>", "Dash", accessMf);
   await bucket.put(
     `pages/012345abcdef~${Buffer.from("Old").toString("base64url")}.html`,
     "<p>old</p>",
   );
 
-  const listing = listingSchema.parse(
+  const listing = dashboardListingSchema.parse(
     await (await dashboard("/api/dashboard/pages")).json(),
   );
   assert.ok(listing.items.find((page) => page.id === id));
@@ -569,6 +792,47 @@ test("dashboard owner lists and deletes with origin and legacy handling", async 
   );
 });
 
+test("views count real reads only and show in the owner's list", async () => {
+  const startDay = new Date().toISOString().slice(0, 10);
+  const { id, url } = await publish("<p>views</p>", "Viewed", accessMf);
+  const read = async (init?: { method?: string; headers?: Record<string, string> }) => {
+    const response = await accessMf.dispatchFetch(url, init);
+    await response.body?.cancel();
+  };
+  await read();
+  await read();
+  await read({ method: "HEAD" });
+  await read({ headers: { "user-agent": "Slackbot-LinkExpanding 1.0" } });
+  await (await dashboard(`/api/dashboard/pages/${id}/preview`)).body?.cancel();
+
+  const listed = async () =>
+    dashboardListingSchema
+      .parse(await (await dashboard("/api/dashboard/pages")).json())
+      .items.find((page) => page.id === id);
+  // Counts are written after the response is sent, so wait for both to land
+  // and then a little longer in case a third, wrong one is still on its way.
+  for (let attempt = 0; attempt < 40 && (await listed())?.views !== 2; attempt++) {
+    await delay(25);
+  }
+  await delay(50);
+  const page = await listed();
+  assert.equal(page?.views, 2);
+  // Either day is right when the run crosses midnight UTC.
+  assert.ok(
+    [startDay, new Date().toISOString().slice(0, 10)].includes(page?.lastViewed ?? ""),
+  );
+
+  const deleted = await dashboard(`/api/dashboard/pages/${id}`, {
+    method: "DELETE",
+    headers: { origin: base },
+  });
+  assert.equal(deleted.status, 200);
+  const bucket = await accessMf.getR2Bucket("PAGES");
+  await bucket.put(`pages/${id}.html`, "<p>again</p>");
+  assert.equal((await listed())?.views, 0, "counts are deleted with the page");
+  await bucket.delete(`pages/${id}.html`);
+});
+
 test("dashboard preview is owner-only and framable only by the dashboard", async () => {
   const bucket = await accessMf.getR2Bucket("PAGES");
   await bucket.put("pages/abcdef012345.html", "<p>preview</p>");
@@ -600,21 +864,13 @@ const storageSchema = z.object({
   freeTierBytes: count,
   objectCount: count,
   pageCount: count,
+  assetCount: count,
+  assetBytes: count,
   complete: z.boolean(),
   months: z.array(
     z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), bytes: count, pages: count }),
   ),
-  largest: z
-    .array(
-      z.object({
-        id: z.string(),
-        title: z.string(),
-        url: z.string().url(),
-        createdAt: z.string().datetime(),
-        bytes: count,
-      }),
-    )
-    .max(10),
+  largest: z.array(pageSchema).max(10),
 });
 
 test("storage report is owner-only and counts pages apart from other objects", async () => {
@@ -633,14 +889,17 @@ test("storage report is owner-only and counts pages apart from other objects", a
   });
   await bucket.put(`pages/${smallId}.html`, "x".repeat(50));
   await bucket.put("uploads/notes.txt", "x".repeat(7));
+  await bucket.put(`assets/${"c".repeat(32)}.png`, "x".repeat(11));
 
   const response = await dashboard("/api/dashboard/storage");
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const report = storageSchema.parse(await response.json());
-  assert.equal(report.usedBytes, 457);
-  assert.equal(report.objectCount, 3);
+  assert.equal(report.usedBytes, 468);
+  assert.equal(report.objectCount, 4);
   assert.equal(report.pageCount, 2);
+  assert.equal(report.assetCount, 1);
+  assert.equal(report.assetBytes, 11);
   assert.equal(report.freeTierBytes, 10_000_000_000);
   assert.equal(report.complete, true);
   assert.deepEqual(report.months, [

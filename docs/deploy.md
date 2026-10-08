@@ -28,6 +28,7 @@ from R2 and skip the Worker.
 ## 3. Set the API key
 
 Nobody issues this key. You make it up, and it is the only credential your agents see.
+Use a generated value, not a phrase: upload URLs are signed with it.
 
 ```bash
 openssl rand -hex 32
@@ -87,7 +88,8 @@ This part applies only to the hosted instance.
 - Its bucket is `html-slop`, which holds every existing link. Never rename or recreate it.
 - A push to the `cloudflare` branch deploys on its own through Workers Builds.
 - `bun run deploy:production` targets a different Worker that has none of the live
-  secrets. Leave it alone until the domain is moved on purpose.
+  secrets, view counts or image references. Leave it alone until the domain is moved on
+  purpose.
 
 Manual fallback:
 
