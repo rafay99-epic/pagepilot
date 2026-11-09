@@ -38,7 +38,7 @@ export const storageReportSchema = z.object({
   freeTierBytes: count,
   objectCount: count,
   pageCount: count,
-  // Uploaded images, counted apart from pages.
+  // Uploaded images and video, counted apart from pages.
   assetCount: count,
   assetBytes: count,
   // False when the bucket holds more objects than one report scans.

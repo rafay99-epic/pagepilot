@@ -4,37 +4,73 @@ import type { Env } from "./env";
 import { objectResponse, publicBase, SECURITY_HEADERS } from "./http";
 import { trackUpload } from "./ledger";
 
-// Raster images only. Assets are served from the dashboard's origin, so
-// nothing that can run script (SVG, HTML) is accepted.
+// Raster images and video only. Assets are served from the dashboard's
+// origin, so nothing that can run script (SVG, HTML) is accepted.
 export const ASSET_TYPES = [
   "image/png",
   "image/jpeg",
   "image/webp",
   "image/gif",
   "image/avif",
+  "video/mp4",
+  "video/webm",
 ] as const;
 
-// `<32 hex id>.<image subtype>`; the extension decides the content type.
-const ASSET_NAME = /^[a-f0-9]{32}\.(png|jpeg|webp|gif|avif)$/;
+// `<32 hex id>.<subtype>`; the extension decides the content type.
+const EXTENSIONS = "png|jpeg|webp|gif|avif|mp4|webm";
+const ASSET_NAME = new RegExp(`^[a-f0-9]{32}\\.(${EXTENSIONS})$`);
 const ASSET_ID = /^[a-f0-9]{32}$/;
-const ASSET_TYPE = /\.(?:png|jpeg|webp|gif|avif)/g;
-const ASSET_LINK = /\/a\/([a-f0-9]{32}\.(?:png|jpeg|webp|gif|avif))/g;
-const MAX_ASSET_BYTES = 10_000_000;
+const ASSET_TYPE = new RegExp(`\\.(?:${EXTENSIONS})`, "g");
+const ASSET_LINK = new RegExp(`/a/([a-f0-9]{32}\\.(?:${EXTENSIONS}))`, "g");
 const UPLOAD_TTL_SECONDS = 600;
+
+// Per kind: the size cap and how the accepted formats open, read as latin1.
+// The signature catches the wrong file, such as an error page saved as
+// shot.png; it is not what keeps a crafted file harmless, the response
+// headers are. Any format of the right kind passes, since browsers play and
+// render by the bytes, whatever type the name claims. Video stops at 100 MB,
+// the largest request body a Worker on the free plan accepts.
+const KINDS = {
+  image: {
+    maxBytes: 10_000_000,
+    tooBig: "Image exceeds the 10 MB limit",
+    start:
+      /^(?:\x89PNG\r\n.\n|\xff\xd8\xff|GIF8[79]a|RIFF.{4}WEBP|.{4}ftyp.{0,52}avi[fs])/s,
+    refused: "Not a PNG, JPEG, WebP, GIF or AVIF image",
+  },
+  video: {
+    maxBytes: 100_000_000,
+    tooBig: "Video exceeds the 100 MB limit",
+    // An ISO media file that is not an AVIF image, or an EBML (WebM) header.
+    // oxlint-disable-next-line no-control-regex
+    start: /^(?:.{4}ftyp(?!avi[fs])|\x1a\x45\xdf\xa3)/s,
+    refused: "Not an MP4 or WebM video",
+  },
+};
 
 const ASSET_HEADERS = {
   ...SECURITY_HEADERS,
   "content-security-policy": "default-src 'none'; sandbox",
-  // Revalidated on every load so a deleted image stops showing.
+  // Revalidated on every load so a deleted file stops showing.
   "cache-control": "private, no-cache",
 };
 
-// How the accepted formats open, read as latin1. It catches the wrong file,
-// such as an error page saved as shot.png; it is not what keeps a crafted file
-// harmless, the response headers are. Any of the five passes, since browsers
-// render an image by its bytes, whatever type its name claims.
-const IMAGE_START =
-  /^(?:\x89PNG\r\n.\n|\xff\xd8\xff|GIF8[79]a|RIFF.{4}WEBP|.{4}ftyp.{0,52}avi[fs])/s;
+// One `bytes=` range, the only form browsers send for media. Anything else,
+// multiple ranges included, is ignored and the whole file is sent, which
+// RFC 9110 allows. Fifteen digits keeps every number exact.
+const RANGE = /^bytes=(\d{0,15})-(\d{0,15})$/;
+type ByteRange = { offset: number; length?: number } | { suffix: number };
+
+function parseRange(header: string | null): ByteRange | undefined {
+  const [, first = "", last = ""] = RANGE.exec(header?.trim() ?? "") ?? [];
+  if (first) {
+    const offset = Number(first);
+    if (!last) return { offset };
+    const end = Number(last);
+    return end >= offset ? { offset, length: end - offset + 1 } : undefined;
+  }
+  return Number(last) > 0 ? { suffix: Number(last) } : undefined;
+}
 
 function sign(apiKey: string, name: string, expires: number): string {
   return createHmac("sha256", apiKey)
@@ -46,14 +82,15 @@ function uploadJson(body: { error: string } | { url: string }, status: number) {
   return Response.json(body, { status, headers: { "cache-control": "no-store" } });
 }
 
-// Mints a one-use upload URL for an image and the URL it will be served from.
+// Mints a one-use upload URL for an image or video and the URL it will be
+// served from.
 // The signature stands in for the API key, so a shell can upload without it.
 export function createUpload(
   apiKey: string,
   base: string,
   type: (typeof ASSET_TYPES)[number],
 ) {
-  const name = `${crypto.randomUUID().replace(/-/g, "")}.${type.slice("image/".length)}`;
+  const name = `${crypto.randomUUID().replace(/-/g, "")}.${type.slice(type.indexOf("/") + 1)}`;
   const expires = Math.floor(Date.now() / 1000) + UPLOAD_TTL_SECONDS;
   return {
     uploadUrl: `${base}/api/assets/${name}?expires=${expires}&signature=${sign(apiKey, name, expires)}`,
@@ -91,27 +128,38 @@ export async function handleUpload(
       headers: { allow: "PUT", "cache-control": "no-store" },
     });
   }
+  const kind = extension === "mp4" || extension === "webm" ? "video" : "image";
+  const { maxBytes, tooBig, start, refused } = KINDS[kind];
   const length = Number(request.headers.get("content-length"));
   if (!request.body || !Number.isInteger(length) || length <= 0) {
     return uploadJson({ error: "Send the file with a Content-Length" }, 411);
   }
-  if (length > MAX_ASSET_BYTES) {
-    return uploadJson({ error: "Image exceeds the 10 MB limit" }, 413);
-  }
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (!IMAGE_START.test(Buffer.from(bytes.subarray(0, 64)).toString("latin1"))) {
-    return uploadJson({ error: "Not a PNG, JPEG, WebP, GIF or AVIF image" }, 415);
-  }
-  const object = await env.PAGES.put(`assets/${name}`, bytes, {
+  if (length > maxBytes) return uploadJson({ error: tooBig }, 413);
+  // Streamed straight into R2, so a video never sits in the Worker's memory
+  // and no script touches its bytes. The start is checked once stored; a
+  // wrong file is deleted again, which leaves the upload URL unused. It is
+  // handed to the ledger first, so a file left behind by a failed check or
+  // delete is still swept a day later.
+  const key = `assets/${name}`;
+  const object = await env.PAGES.put(key, request.body, {
     onlyIf: { etagDoesNotMatch: "*" },
-    httpMetadata: { contentType: `image/${extension}` },
+    httpMetadata: { contentType: `${kind}/${extension}` },
   });
   if (!object) return uploadJson({ error: "Upload URL already used" }, 409);
-  await trackUpload(env, `assets/${name}`);
+  await trackUpload(env, key);
+  const head = await env.PAGES.get(key, { range: { offset: 0, length: 64 } });
+  const bytes = head ? Buffer.from(await head.arrayBuffer()) : Buffer.alloc(0);
+  if (!start.test(bytes.toString("latin1"))) {
+    await env.PAGES.delete(key);
+    return uploadJson({ error: refused }, 415);
+  }
   return uploadJson({ url: `${publicBase(request, env)}/a/${name}` }, 201);
 }
 
-// GET /a/<name>: an uploaded image, readable by anyone holding its link.
+// GET /a/<name>: an uploaded file, readable by anyone holding its link.
+// Honours one byte range, which video needs: Safari plays nothing without
+// it and every browser needs it to seek. Assets never change once stored,
+// so If-Range has nothing to protect and is not checked.
 export async function serveAsset(
   request: Request,
   env: Env,
@@ -123,17 +171,63 @@ export async function serveAsset(
       headers: { ...ASSET_HEADERS, allow: "GET, HEAD" },
     });
   }
-  const object = ASSET_NAME.test(name) ? await env.PAGES.get(`assets/${name}`) : null;
-  if (!object) return new Response("Not found", { status: 404, headers: ASSET_HEADERS });
-  return objectResponse(request, object, {
+  if (!ASSET_NAME.test(name)) return notFound();
+  const key = `assets/${name}`;
+  const range = parseRange(request.headers.get("range"));
+  let object: R2ObjectBody | null;
+  try {
+    object = await env.PAGES.get(key, range && { range });
+  } catch (error) {
+    // R2 throws when the range starts past the end of the file.
+    const offset = range && "offset" in range ? range.offset : undefined;
+    const stored = offset === undefined ? null : await env.PAGES.head(key);
+    if (!stored || offset === undefined || offset < stored.size) throw error;
+    return unsatisfiable(stored.size);
+  }
+  if (!object) return notFound();
+  const headers = {
     ...ASSET_HEADERS,
+    "accept-ranges": "bytes",
     "content-type": object.httpMetadata?.contentType ?? "application/octet-stream",
+  };
+  if (!range) return objectResponse(request, object, headers);
+  // R2 clamps a range that runs past the end; the header says what it sent.
+  const { size } = object;
+  const [first, end] =
+    "suffix" in range
+      ? [Math.max(size - range.suffix, 0), size]
+      : [range.offset, Math.min(range.offset + (range.length ?? size), size)];
+  // Should R2 ever send an empty body rather than throw, it is still a 416.
+  if (first >= size) {
+    await object.body.cancel();
+    return unsatisfiable(size);
+  }
+  return objectResponse(
+    request,
+    object,
+    { ...headers, "content-range": `bytes ${first}-${end - 1}/${size}` },
+    206,
+  );
+}
+
+function notFound(): Response {
+  return new Response("Not found", { status: 404, headers: ASSET_HEADERS });
+}
+
+function unsatisfiable(size: number): Response {
+  return new Response(null, {
+    status: 416,
+    headers: {
+      ...ASSET_HEADERS,
+      "accept-ranges": "bytes",
+      "content-range": `bytes */${size}`,
+    },
   });
 }
 
-// Storage keys of the images a page embeds. Any mention of an image's name
+// Storage keys of the uploads a page embeds. Any mention of a file's name
 // counts, so a link survives however the HTML escapes its slashes; a stray
-// mention only keeps an image longer. Names are found from the extension
+// mention only keeps a file longer. Names are found from the extension
 // backwards, which stays quick on a page full of hex.
 export function assetKeys(html: string): string[] {
   const keys = new Set<string>();
@@ -144,7 +238,7 @@ export function assetKeys(html: string): string[] {
   return [...keys];
 }
 
-// The /a/ images a page links to that are not in the bucket: never uploaded,
+// The /a/ uploads a page links to that are not in the bucket: never uploaded,
 // or deleted for want of a page. Empty when the check itself fails.
 // ponytail: checks the first 50 links; a page with more gets a partial answer.
 export async function missingAssets(bucket: R2Bucket, html: string): Promise<string[]> {

@@ -8,8 +8,8 @@ The details, for when you need them.
 | ------------------------ | ------------------------------- | ---------------------------------------- |
 | `POST /api/mcp`          | Agents with the API key         | The MCP endpoint                         |
 | `GET /p/<id>`            | Anyone with the link            | Serves a published page                  |
-| `GET /a/<name>`          | Anyone with the link            | Serves an uploaded image                 |
-| `PUT /api/assets/<name>` | Anyone with a signed upload URL | Stores one image, once                   |
+| `GET /a/<name>`          | Anyone with the link            | Serves an uploaded image or video        |
+| `PUT /api/assets/<name>` | Anyone with a signed upload URL | Stores one image or video, once          |
 | `/dashboard/`            | The owner, through Access       | The dashboard                            |
 | `/api/dashboard/*`       | The owner, through Access       | List, preview, delete and storage report |
 | `GET /`                  | Anyone                          | Landing page                             |
@@ -25,10 +25,18 @@ the deletion key and, once a page has been updated, its first publish time sit i
 object's metadata. There is no index file. The version a page had before its last
 update is kept beside it as `previous/<id>.html` and is deleted with the page.
 
-An uploaded image is one object too, `assets/<32-hex-id>.<type>`. Two things live outside
-R2, in one Durable Object: view counts, as one row per page per day, and the record of
-which page embeds which image. It stores nothing about who viewed a page. An image no
-page embeds, counting the kept earlier version, is deleted from the bucket a day later.
+An uploaded image or video is one object too, `assets/<32-hex-id>.<type>`. Uploads stream
+straight into R2, then their first bytes are checked and a wrong file is deleted again.
+Two things live outside R2, in one Durable Object: view counts, as one row per page per
+day, and the record of which page embeds which upload. It stores nothing about who viewed
+a page. An upload no page embeds, counting the kept earlier version, is deleted from the
+bucket a day later.
+
+`/a/<name>` honours a single `Range` header and answers `206 Partial Content`, which
+video needs to stream and seek. R2 egress is free, so playback costs only one Worker
+request and one R2 read per range the browser asks for. A short clip played through
+takes two or three; a long one with a lot of seeking can take a few dozen. Against the
+free plan's 100,000 Worker requests a day, that is thousands of video views a day.
 
 Pages from before the Worker rewrite use `pages/<12-hex-id>~<base64url-title>.html`.
 PagePilot still reads, lists and deletes them, so old links keep working and nothing
@@ -52,7 +60,8 @@ the dashboard sees the numbers.
 ## Privacy
 
 A page is as private as its link. The id is 128 bits, so nobody finds a page by guessing.
-Whoever gets a link can still read it and forward it. Images follow the same rule.
+Whoever gets a link can still read it and forward it. Images and video follow the same
+rule.
 
 - **Sandboxed.** Pages are served with a sandbox CSP, `no-referrer` and `nosniff`.
   Scripts and HTTPS assets still run inside the sandbox.
@@ -72,8 +81,8 @@ Do not publish secrets. If a page should stop being readable, delete it.
 src/              The Worker
   index.ts        Router
   mcp.ts          MCP endpoint and its tools
-  assets.ts       Image uploads and /a/<name>
-  ledger.ts       View counts and image references, a Durable Object
+  assets.ts       Image and video uploads and /a/<name>
+  ledger.ts       View counts and upload references, a Durable Object
   dashboard.ts    Owner-only dashboard routes
   access.ts       Cloudflare Access token check
   serve-page.ts   Serves /p/<id>

@@ -35,12 +35,12 @@ async function exactText(object: R2ObjectBody): Promise<string> {
   return Buffer.from(await object.arrayBuffer()).toString();
 }
 
-// A line for a tool reply naming linked images that are not in the bucket, so
-// the agent hears about a broken image when it publishes, not never.
+// A line for a tool reply naming linked uploads that are not in the bucket, so
+// the agent hears about a broken image or video when it publishes, not never.
 async function imageNote(env: Env, html: string): Promise<string> {
   const missing = await missingAssets(env.PAGES, html);
   return missing.length > 0
-    ? `\nNot uploaded, so these images will not show: ${missing.join(", ")}`
+    ? `\nNot uploaded, so these files will not show: ${missing.join(", ")}`
     : "";
 }
 
@@ -305,13 +305,16 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
     "create_upload_url",
     {
       description:
-        "Get a one-use URL for uploading an image from the shell with curl, plus the URL to embed in a page. PNG, JPEG, WebP, GIF or AVIF, up to 10 MB. Use this instead of inlining base64. An image no page embeds within a day is deleted.",
+        "Get a one-use URL for uploading an image or video from the shell with curl, plus the URL to embed in a page. Images: PNG, JPEG, WebP, GIF or AVIF, up to 10 MB. Video: MP4 or WebM, up to 100 MB; never convert video to animated WebP or GIF. Use this instead of inlining base64. A file no page embeds within a day is deleted.",
       inputSchema: { contentType: z.enum(ASSET_TYPES) },
     },
     ({ contentType }) => {
       const { uploadUrl, assetUrl } = createUpload(apiKey, base, contentType);
+      const video = contentType.startsWith("video/")
+        ? `\nCompress first, to save storage and start fast:\nffmpeg -i <input> -c:v libx264 -crf 28 -preset slow -vf "scale='min(1280,iw)':-2" -c:a aac -b:a 96k -movflags +faststart out.mp4\nEmbed as <video src="${assetUrl}" controls playsinline preload="metadata"></video>`
+        : "";
       return text(
-        `Upload the file:\ncurl -T <file> "${uploadUrl}"\nThen embed: ${assetUrl}\nThe upload URL works once and expires in 10 minutes. Put the image in a page within a day, or it is deleted.`,
+        `Upload the file:\ncurl -T <file> "${uploadUrl}"\nThen embed: ${assetUrl}\nThe upload URL works once and expires in 10 minutes. Put the file in a page within a day, or it is deleted.${video}`,
       );
     },
   );

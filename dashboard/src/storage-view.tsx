@@ -86,11 +86,11 @@ export function StorageView() {
           <dd>{report.pageCount}</dd>
         </div>
         <div>
-          <dt>Images</dt>
+          <dt>Uploads</dt>
           <dd>{report.assetCount}</dd>
         </div>
         <div>
-          <dt>Image size</dt>
+          <dt>Upload size</dt>
           <dd>{formatBytes(report.assetBytes)}</dd>
         </div>
         <div>
