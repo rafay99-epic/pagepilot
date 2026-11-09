@@ -45,7 +45,7 @@ file name.
 | `update_page`       | `id`, `html`, optional `title` | The same link, now serving the new HTML       |
 | `get_page`          | `id`, optional `previous`      | The page's details, then its exact HTML       |
 | `list_pages`        | optional filters, see below    | Pages as JSON, newest update first            |
-| `create_upload_url` | `contentType`                  | A one-use upload URL and the image's link     |
+| `create_upload_url` | `contentType`                  | A one-use upload URL and the file's link      |
 | `delete_page`       | `id`, `deletionKey`            | A confirmation, or a note the page is missing |
 
 `html` can be up to 900,000 UTF-8 bytes. `title` can be up to 120 characters.
@@ -82,30 +82,51 @@ Each page comes back with `id`, `title`, `url`, `createdAt`, `updatedAt` and `by
 Each call reads the whole vault, so `list_pages` is limited to about 30 calls a minute.
 Past that the tool answers with an error until the minute is up.
 
-## Add images
+## Add images and video
 
-Base64 in a tool call makes the model type the whole image out. Upload the file from the
+Base64 in a tool call makes the model type the whole file out. Upload the file from the
 shell instead:
 
-1. Call `create_upload_url` with the image type, for example `image/png`.
+1. Call `create_upload_url` with the file type, for example `image/png` or `video/mp4`.
 2. Run the `curl` line it returns:
 
    ```bash
    curl -T shot.png "<upload URL>"
    ```
 
-3. Put the returned image link in the page as `<img src="...">`. Keep the file name whole:
-   PagePilot finds a page's images by their names in the HTML.
+3. Put the returned link in the page as `<img src="...">` or
+   `<video src="..." controls playsinline preload="metadata"></video>`. Keep the file name
+   whole: PagePilot finds a page's uploads by their names in the HTML.
 
 The upload URL works once and expires in 10 minutes. It carries its own signature, so
-the shell never needs the API key. PNG, JPEG, WebP, GIF and AVIF are accepted, up to
-10 MB each. A file that is not one of those is refused.
+the shell never needs the API key. PNG, JPEG, WebP, GIF and AVIF images are accepted up
+to 10 MB each, MP4 and WebM video up to 100 MB. A file that is not one of those is
+refused.
 
-An image lives as long as some page embeds it, counting the earlier version an update
+### Video
+
+Send video as video. Converting a clip to animated WebP or GIF makes it several times
+bigger and loses sound and seeking. Compress it first; screen recordings shrink a lot:
+
+```bash
+ffmpeg -i in.mov -c:v libx264 -crf 28 -preset slow \
+  -vf "scale='min(1280,iw)':-2" -c:a aac -b:a 96k \
+  -movflags +faststart out.mp4
+```
+
+That gives H.264 at up to 1280 pixels wide, which every browser plays, at roughly 3 to
+8 MB a minute for a screen recording. `+faststart` moves the index to the front so
+playback starts before the file finishes loading. Video is served in byte ranges, so it
+streams and seeks like any hosted video. For a still frame before playback, upload a JPEG
+and pass it as `poster`.
+
+### How long uploads live
+
+An upload lives as long as some page embeds it, counting the earlier version an update
 keeps. Once nothing embeds it, it is kept one more day and then deleted. Publish or update
-a page with it inside that day and it stays. An image that was uploaded and never
-embedded goes the same way, a day after the upload. When a page links an image that is
-not there, the reply to `deploy_page` or `update_page` names it.
+a page with it inside that day and it stays. A file that was uploaded and never embedded
+goes the same way, a day after the upload. When a page links an upload that is not there,
+the reply to `deploy_page` or `update_page` names it.
 
 ## Deletion keys
 

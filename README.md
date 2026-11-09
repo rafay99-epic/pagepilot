@@ -19,7 +19,7 @@ Agents are good at writing HTML and bad at showing it to you. PagePilot fixes th
 part. Your agent sends a page of HTML over MCP, PagePilot stores it in your own private R2
 bucket, and the agent gets a short link back.
 
-One Cloudflare Worker runs all of it. Pages and images live in R2, view counts in a
+One Cloudflare Worker runs all of it. Pages, images and video live in R2, view counts in a
 Durable Object, and there is no separate login service. A private dashboard, guarded by
 Cloudflare Access, lets you search, preview and delete what your agents published.
 

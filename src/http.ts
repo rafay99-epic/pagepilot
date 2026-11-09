@@ -6,7 +6,8 @@ export type Json = string | number | boolean | null | Json[] | { [key: string]: 
 
 // Policy for stored pages. Public links refuse framing; the owner preview
 // route passes 'self' so only the dashboard can embed a page. `origin` lets a
-// page load its uploaded images when the Worker runs on plain HTTP locally.
+// page load its uploaded images and video when the Worker runs on plain HTTP
+// locally.
 export function pageCsp(frameAncestors: "'none'" | "'self'", origin = ""): string {
   return [
     "sandbox allow-scripts allow-popups",
@@ -16,7 +17,7 @@ export function pageCsp(frameAncestors: "'none'" | "'self'", origin = ""): strin
     `img-src data: blob: https: ${origin}`.trim(),
     "font-src data: https:",
     "connect-src https:",
-    "media-src blob: https:",
+    `media-src blob: https: ${origin}`.trim(),
     "frame-src https:",
     "base-uri 'none'",
     "form-action 'none'",
@@ -48,11 +49,14 @@ export function publicBase(request: Request, env: Env): string {
   return env.PUBLIC_URL?.replace(/\/+$/, "") || new URL(request.url).origin;
 }
 
-// Answers GET or HEAD for a stored object and honours If-None-Match.
+// Answers GET or HEAD for a stored object and honours If-None-Match. `status`
+// is 206 when the object is a byte range of the stored file. A 304 carries no
+// Content-Range, since it describes no body (RFC 9110, 15.4.5).
 export async function objectResponse(
   request: Request,
   object: R2ObjectBody,
   headers: Record<string, string>,
+  status: 200 | 206 = 200,
 ): Promise<Response> {
   const withEtag = { ...headers, etag: object.httpEtag };
   const matches = request.headers
@@ -64,9 +68,14 @@ export async function objectResponse(
     });
   if (matches || request.method === "HEAD") {
     await object.body.cancel();
-    return new Response(null, { status: matches ? 304 : 200, headers: withEtag });
+    const response = new Response(null, {
+      status: matches ? 304 : status,
+      headers: withEtag,
+    });
+    if (matches) response.headers.delete("content-range");
+    return response;
   }
-  return new Response(object.body, { headers: withEtag });
+  return new Response(object.body, { status, headers: withEtag });
 }
 
 // Dashboard and dashboard API responses; every shape is part of the contract

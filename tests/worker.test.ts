@@ -265,15 +265,16 @@ test("publish, list without arguments, stream, conditional GET, HEAD and delete"
     !response.headers.get("content-security-policy")?.includes("allow-same-origin"),
   );
   // Over plain HTTP, as in local runs, the page's own origin is allowed for
-  // images so uploads load. Over HTTPS the policy is the one pages always had.
+  // images and video so uploads load. Over HTTPS the policy is the one pages
+  // always had.
   assert.match(
     response.headers.get("content-security-policy") ?? "",
-    /img-src data: blob: https:;/,
+    /img-src data: blob: https:;.*media-src blob: https:;/,
   );
   const local = await mf.dispatchFetch(url.replace("https://", "http://"));
   assert.match(
     local.headers.get("content-security-policy") ?? "",
-    /img-src data: blob: https: http:\/\/pagepilot\.test;/,
+    /img-src data: blob: https: http:\/\/pagepilot\.test;.*media-src blob: https: http:\/\/pagepilot\.test;/,
   );
   await local.body?.cancel();
   const etag = response.headers.get("etag");
@@ -451,12 +452,12 @@ test("update_page moves a legacy page to the current key and keeps its link", as
   await bucket.delete(`pages/${id}.html`);
 });
 
-async function grant() {
-  const { text } = await callTool("create_upload_url", { contentType: "image/png" });
+async function grant(contentType = "image/png") {
+  const { text } = await callTool("create_upload_url", { contentType });
   const uploadUrl = /curl -T <file> "([^"]+)"/.exec(text)?.[1];
   const assetUrl = /Then embed: (\S+)/.exec(text)?.[1];
   assert.ok(uploadUrl && assetUrl);
-  return { uploadUrl, assetUrl };
+  return { uploadUrl, assetUrl, text };
 }
 // The PNG signature and a few bytes of body.
 const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
@@ -541,6 +542,96 @@ test("an image uploads once, is served safely and outlives its last page by a da
     id: /\/p\/([a-f0-9]{32})/.exec(broken.text)?.[1] ?? "",
     deletionKey: deletionKey(broken) ?? "",
   });
+});
+
+// The start of an MP4 (an ISO media `ftyp` box) and 1,000 bytes of body.
+const mp4 = new Uint8Array(1024).map((_, i) => i % 251);
+mp4.set([0, 0, 0, 24, ...new TextEncoder().encode("ftypisom")]);
+
+test("a video uploads, streams by byte range and is cleaned up like an image", async () => {
+  const clip = await grant("video/mp4");
+  assert.match(clip.text, /ffmpeg .*-movflags \+faststart/);
+  assert.match(clip.text, /<video src="[^"]+\.mp4" controls/);
+  assert.equal((await put(clip.uploadUrl, new Uint8Array(100_000_001))).status, 413);
+  // An image, an AVIF above all since it opens like an MP4, is not a video,
+  // and refusing it leaves the URL unused.
+  const avif = new Uint8Array(32);
+  avif.set(new TextEncoder().encode("\0\0\0\x1cftypavif"));
+  for (const wrong of [png, avif]) {
+    assert.equal((await put(clip.uploadUrl, wrong)).status, 415);
+    assert.equal(await status(clip.assetUrl), 404);
+  }
+  assert.equal((await put(clip.uploadUrl, mp4)).status, 201);
+  assert.equal((await put(clip.uploadUrl, mp4)).status, 409);
+  // A video is not an image either.
+  assert.equal((await put((await grant()).uploadUrl, mp4)).status, 415);
+  const webm = await grant("video/webm");
+  const ebml = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
+  assert.equal((await put(webm.uploadUrl, ebml)).status, 201);
+  const webmServed = await mf.dispatchFetch(webm.assetUrl);
+  assert.equal(webmServed.headers.get("content-type"), "video/webm");
+  await webmServed.body?.cancel();
+
+  const full = await mf.dispatchFetch(clip.assetUrl);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get("content-type"), "video/mp4");
+  assert.equal(full.headers.get("accept-ranges"), "bytes");
+  assert.match(full.headers.get("content-security-policy") ?? "", /sandbox/);
+  assert.deepEqual(new Uint8Array(await full.arrayBuffer()), mp4);
+
+  const ranged = async (
+    range: string,
+    init: { method?: string; headers?: Record<string, string> } = {},
+  ) => mf.dispatchFetch(clip.assetUrl, { ...init, headers: { range, ...init.headers } });
+  for (const [range, from, to] of [
+    ["bytes=0-", 0, 1024],
+    ["bytes=0-0", 0, 1],
+    ["bytes=0-1", 0, 2],
+    ["bytes=1000-", 1000, 1024],
+    ["bytes=-24", 1000, 1024],
+    ["bytes=1000-99999", 1000, 1024],
+    ["bytes=-99999", 0, 1024],
+  ] as const) {
+    const part = await ranged(range);
+    assert.equal(part.status, 206, range);
+    assert.equal(part.headers.get("content-range"), `bytes ${from}-${to - 1}/1024`);
+    assert.equal(part.headers.get("content-length"), String(to - from));
+    assert.deepEqual(new Uint8Array(await part.arrayBuffer()), mp4.slice(from, to));
+  }
+  for (const range of ["bytes=1024-", "bytes=2000-2001"]) {
+    const past = await ranged(range);
+    assert.equal(past.status, 416, range);
+    assert.equal(past.headers.get("content-range"), "bytes */1024");
+  }
+  // Forms browsers do not send for media get the whole file.
+  for (const range of ["bytes=0-1,4-5", "bytes=5-2", "bytes=-0", "items=0-1"]) {
+    const whole = await ranged(range);
+    assert.equal(whole.status, 200, range);
+    assert.equal((await whole.arrayBuffer()).byteLength, 1024);
+  }
+  const head = await ranged("bytes=0-1", { method: "HEAD" });
+  assert.equal(head.status, 206);
+  assert.equal(await head.text(), "");
+  const etag = full.headers.get("etag") ?? "";
+  const cached = await ranged("bytes=0-1", { headers: { "if-none-match": etag } });
+  assert.equal(cached.status, 304);
+  assert.equal(cached.headers.get("content-range"), null);
+  assert.equal(await cached.text(), "");
+  assert.equal((await ranged("bytes=0-1", { method: "POST" })).status, 405);
+  const missing = await mf.dispatchFetch(`${base}/a/${"b".repeat(32)}.mp4`, {
+    headers: { range: "bytes=5-" },
+  });
+  assert.equal(missing.status, 404);
+  await missing.body?.cancel();
+
+  // A page that embeds the video keeps it; once it is gone, the video goes.
+  const page = await publish(`<video src="${clip.assetUrl}" controls></video>`, "Demo");
+  await sweepImages();
+  assert.equal(await status(clip.assetUrl), 200, "embedded");
+  assert.equal(await status(webm.assetUrl), 404, "never embedded");
+  await callTool("delete_page", { id: page.id, deletionKey: page.deletionKey });
+  await sweepImages();
+  assert.equal(await status(clip.assetUrl), 404, "deleted after its page");
 });
 
 test("update_page keeps the version it replaced, images included, until the next change", async () => {
